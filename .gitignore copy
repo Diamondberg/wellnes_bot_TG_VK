@@ -1,0 +1,41 @@
+# Секреты
+.env
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Старая БД
+*.db
+*.sqlite
+*.sqlite3
+wellness.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+logs/
+
+# Папка с генерируемыми отчётами (test_step2.py и в проде)
+output/
+*.xlsx.tmp
+
+# Тестовые отчёты от старой версии test_step2 (если остались)
+test_output_report.txt
+test_output_report.xlsx
