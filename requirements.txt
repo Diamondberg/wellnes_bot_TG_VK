@@ -19,3 +19,6 @@ openpyxl==3.1.5
 
 # === Utils ===
 aiohttp==3.10.10
+
+# === Windows tzdata (нужен для timezone-aware дат на Windows) ===
+tzdata==2024.2
