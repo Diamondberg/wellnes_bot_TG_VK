@@ -1,0 +1,37 @@
+# Секреты
+.env
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Старая БД
+*.db
+*.sqlite
+*.sqlite3
+wellness.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+logs/
+
+# Временные файлы отчётов
+output/
+*.xlsx.tmp
