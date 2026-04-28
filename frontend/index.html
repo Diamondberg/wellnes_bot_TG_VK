@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1D9E75">
+    <title>Wellness Test</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js (для реактивности) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Telegram Mini Apps SDK (готовим на будущее, пока не используем) -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        /* Системные шрифты (быстро грузится, родное на каждой ОС) */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Скрываем скроллбар, но оставляем функциональность */
+        body::-webkit-scrollbar { display: none; }
+        body { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Плавная анимация для кнопок */
+        button:not(:disabled):active {
+            transform: scale(0.98);
+        }
+        button {
+            transition: transform 0.1s, opacity 0.2s, background-color 0.2s;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- Главное приложение (Alpine.js обработает x-data) -->
+    <div x-data="welcomeApp()" class="max-w-md mx-auto bg-white min-h-screen shadow-sm">
+
+        <!-- Hero-картинка -->
+        <div class="aspect-[16/9] bg-gradient-to-br from-orange-50 to-pink-50 overflow-hidden">
+            <img
+                src="assets/images/main.jpg"
+                alt="Wellness Test"
+                class="w-full h-full object-cover"
+                onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\'flex items-center justify-center h-full text-orange-700 text-sm\'>main.jpg не найден</div>'"
+            >
+        </div>
+
+        <!-- Контент -->
+        <div class="px-5 py-6">
+
+            <!-- Заголовок -->
+            <h1 class="text-2xl font-medium text-gray-900 mb-1">Wellness Test</h1>
+            <p class="text-sm text-gray-500 mb-6">Экспресс-проверка здоровья</p>
+
+            <!-- Преимущества (3 пункта) -->
+            <div class="space-y-3 mb-6">
+
+                <div class="flex items-center gap-3 text-gray-800">
+                    <div class="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-base">
+                        ⏱
+                    </div>
+                    <span class="text-[15px]">Займёт всего 2 минуты</span>
+                </div>
+
+                <div class="flex items-center gap-3 text-gray-800">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-medium">
+                        36
+                    </div>
+                    <span class="text-[15px]">простых вопросов</span>
+                </div>
+
+                <div class="flex items-center gap-3 text-gray-800">
+                    <div class="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-sm font-medium">
+                        6
+                    </div>
+                    <span class="text-[15px]">систем организма</span>
+                </div>
+
+            </div>
+
+            <!-- Согласие на 152-ФЗ -->
+            <label class="flex gap-3 p-3 bg-gray-50 rounded-lg mb-4 cursor-pointer hover:bg-gray-100 transition-colors">
+                <input
+                    type="checkbox"
+                    x-model="consent"
+                    class="mt-0.5 w-4 h-4 flex-shrink-0 accent-emerald-600 cursor-pointer"
+                >
+                <span class="text-[13px] text-gray-600 leading-relaxed">
+                    Я согласен на обработку моих персональных данных в соответствии с
+                    <a
+                        href="#"
+                        @click.prevent="showPrivacy()"
+                        class="text-blue-600 hover:underline"
+                    >152-ФЗ</a>
+                </span>
+            </label>
+
+            <!-- Главная кнопка -->
+            <button
+                @click="startTest"
+                :disabled="!consent"
+                :class="consent
+                    ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                    : 'bg-gray-300 cursor-not-allowed'"
+                class="w-full py-3.5 text-white text-[15px] font-medium rounded-lg transition-colors"
+            >
+                Начать тест →
+            </button>
+
+            <!-- Дисклеймер -->
+            <p class="text-[11px] text-gray-400 text-center mt-3 leading-relaxed">
+                Тест носит информационный характер<br>
+                и не является медицинской консультацией
+            </p>
+
+        </div>
+    </div>
+
+    <!-- Логика -->
+    <script>
+        function welcomeApp() {
+            return {
+                consent: false,
+
+                init() {
+                    // Telegram Mini App: говорим что готовы к показу
+                    if (window.Telegram?.WebApp) {
+                        window.Telegram.WebApp.ready();
+                        window.Telegram.WebApp.expand();
+                    }
+                    console.log('✅ Wellness Test loaded');
+                },
+
+                startTest() {
+                    if (!this.consent) return;
+                    // На следующем шаге (4.2) сделаем переход на форму ФИО
+                    alert('Следующий экран — Шаг 4.2 ✨');
+                },
+
+                showPrivacy() {
+                    // На будущее: открыть модалку с политикой
+                    alert('Тут будет полная политика конфиденциальности');
+                }
+            }
+        }
+    </script>
+
+</body>
+</html>
