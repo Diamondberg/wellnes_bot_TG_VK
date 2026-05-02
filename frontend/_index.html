@@ -304,7 +304,8 @@
                         <div class="px-5 py-6">
                             <!-- Заголовок -->
                             <div class="text-center mb-6">
-                                <h1 class="text-2xl font-medium text-gray-900">Вы молодец — прошли весь путь!</h1>
+                                <h1 class="text-2xl font-medium text-gray-900 mb-1">🎉 Тест завершён!</h1>
+                                <p class="text-sm text-gray-500" x-text="`Заявка №${result.data.lead_number}`"></p>
                             </div>
 
                             <!-- Результаты по системам -->
@@ -328,13 +329,12 @@
                             </div>
 
                             <!-- Сообщение о консультанте -->
-                            <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-5">
-                                <p class="text-[14px] text-emerald-900 leading-relaxed">
+                            <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-5">
+                                <p class="text-[14px] text-blue-900 leading-relaxed">
                                     📞 <span class="font-medium">С вами свяжется консультант</span>
                                     для подробной расшифровки результатов
                                     <span x-show="form.email">и пришлёт копию отчёта на почту <span class="font-medium" x-text="form.email"></span></span>.
                                 </p>
-                                <p class="text-[12px] text-emerald-700 mt-2" x-text="`Заявка №${result.data.lead_number}`"></p>
                             </div>
 
                             <!-- Кнопки действий -->
