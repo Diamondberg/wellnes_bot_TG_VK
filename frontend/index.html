@@ -343,6 +343,11 @@
                                 ❤️ Поделиться с близкими
                             </button>
 
+                            <button @click="contactConsultant()"
+                                    class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium rounded-lg flex items-center justify-center gap-2 mb-3">
+                                💬 Связаться с консультантом
+                            </button>
+
                             <button @click="confirmRestartTest()"
                                     class="w-full py-3 bg-white border-2 border-gray-200 hover:border-gray-300 text-gray-700 text-[14px] font-medium rounded-lg flex items-center justify-center gap-2">
                                 🔄 Пройти тест ещё раз
@@ -488,6 +493,10 @@
     <script>
         const STORAGE_KEY = 'wellness_app_state_v1';
         const API_BASE = 'http://127.0.0.1:8000';
+
+        // Куда вести юзера по кнопке "Связаться с консультантом".
+        // Должно совпадать с CONSULTANT_CONTACT_URL на бэкенде (core/config.py).
+        const CONSULTANT_CONTACT_URL = 'https://t.me/Diamondberg';
 
         const COUNTRIES = [
             { flag: '🇷🇺', code: '+7',   maxDigits: 10, placeholder: '999 123 45 67' },
@@ -643,9 +652,18 @@
                         if (ans) answers.push({ question_number: q.number, answer: ans });
                     }
 
+                    // Email — только если указан и валиден.
+                    // Пустую строку/невалидное превращаем в null,
+                    // чтобы Pydantic не ругался на формат.
+                    const emailTrim = this.form.email.trim();
+                    const emailToSend = (emailTrim && EMAIL_RE.test(emailTrim))
+                        ? emailTrim
+                        : null;
+
                     const payload = {
                         full_name: this.form.fullName.trim(),
                         phone: `${this.currentCountry.code}${this.form.phoneDigits}`,
+                        email: emailToSend,
                         consent: this.consent,
                         answers: answers,
                         platform: {
@@ -726,6 +744,22 @@
                 },
                 confirmExitTest() { this.modal = 'exitTest'; },
                 confirmExitTestYes() { this.modal = null; this.screen = 'form'; },
+
+                // ─── Связаться с консультантом ──────────────
+                contactConsultant() {
+                    // В Telegram WebApp используем нативный openTelegramLink
+                    // для t.me-ссылок (открывает чат прямо в TG, не в браузере).
+                    if (window.Telegram?.WebApp && CONSULTANT_CONTACT_URL.includes('t.me/')) {
+                        window.Telegram.WebApp.openTelegramLink(CONSULTANT_CONTACT_URL);
+                        return;
+                    }
+                    // Если не t.me-ссылка (например wa.me) или не TG WebApp — обычный openLink/window.open
+                    if (window.Telegram?.WebApp?.openLink) {
+                        window.Telegram.WebApp.openLink(CONSULTANT_CONTACT_URL);
+                        return;
+                    }
+                    window.open(CONSULTANT_CONTACT_URL, '_blank', 'noopener');
+                },
 
                 // ─── Поделиться с близкими ──────────────────
                 shareWithFriends() {

@@ -4,6 +4,7 @@ Endpoint сабмита теста.
 POST /api/test/submit
   Принимает данные пользователя и 36 ответов от Mini App.
   Сохраняет в БД, считает результат, отправляет email админу (в фоне).
+  Если юзер указал свой email — шлёт ему копию отчёта (в фоне).
   Возвращает Mini App результат для показа.
 """
 
@@ -20,7 +21,7 @@ from api.schemas import (
     TestSubmitOut,
     SystemResultOut,
 )
-from core.notifier import send_lead_email
+from core.notifier import send_lead_email, send_user_report
 from core.questions import get_question
 from core.reports import (
     UserSnapshot,
@@ -53,16 +54,21 @@ def validate_phone(raw: str) -> bool:
 
 
 # ════════════════════════════════════════════════════════════
-#  Background-задача: отчёты + email
+#  Background-задача: отчёты + письма
 # ════════════════════════════════════════════════════════════
 async def _send_reports_in_background(
     user_snapshot: UserSnapshot,
     answers: list,
     result,
+    user_email: str | None,
 ) -> None:
     """
     Запускается ПОСЛЕ того как API вернул ответ Mini App.
-    Делает три вещи: TXT, XLSX, email.
+    Делает:
+      1. Генерирует TXT и Excel
+      2. Сохраняет локально
+      3. Шлёт email админу (TXT + Excel)
+      4. Если у юзера есть email — шлёт ему копию (только TXT)
 
     Если что-то пошло не так — только логирует. Юзер уже получил свой
     result, повторно не дёргаем.
@@ -81,7 +87,7 @@ async def _send_reports_in_background(
         xlsx_path.write_bytes(xlsx_bytes)
         logger.info(f"💾 Отчёты сохранены: {txt_path.name}")
 
-        # Шлём email админу
+        # Шлём email админу (с TXT + Excel)
         await send_lead_email(
             user=user_snapshot,
             result=result,
@@ -90,6 +96,26 @@ async def _send_reports_in_background(
             txt_filename=txt_path.name,
             xlsx_filename=xlsx_path.name,
         )
+
+        # Шлём копию юзеру, если он дал email.
+        # Отдельный try/except — чтобы упавшая отправка юзеру
+        # не помешала остальной обработке (хотя send_user_report
+        # сам по себе не должен бросать исключения — он их ловит).
+        if user_email:
+            try:
+                await send_user_report(
+                    user_email=user_email,
+                    user=user_snapshot,
+                    result=result,
+                    txt_bytes=txt_bytes,
+                    txt_filename=txt_path.name,
+                )
+            except Exception as e:
+                logger.error(
+                    f"❌ Не удалось отправить отчёт юзеру ({user_email}): {e}",
+                    exc_info=True,
+                )
+
     except Exception as e:
         logger.error(f"❌ Ошибка в фоновой обработке: {e}", exc_info=True)
 
@@ -115,12 +141,12 @@ async def submit_test(
     Шаги:
       1. Валидация телефона и согласия
       2. Если есть referrer_platform_id — найти реферера в БД
-      3. Создать/обновить пользователя в БД
+      3. Создать/обновить пользователя в БД (с email если указан)
       4. Записать ответы (старые удаляются — повторное прохождение)
       5. Создать реферальную связь (если есть)
       6. Подсчитать результат
       7. Закоммитить в БД
-      8. Запустить отправку отчётов в фоне
+      8. Запустить отправку отчётов в фоне (админу + юзеру)
       9. Вернуть результат Mini App
     """
     # ─── 1. Валидация ──────────────────────────────────────
@@ -138,6 +164,8 @@ async def submit_test(
 
     phone_clean = normalize_phone(payload.phone)
     full_name = payload.full_name.strip()
+    # EmailStr → строка. None если не указан.
+    user_email = str(payload.email).strip().lower() if payload.email else None
 
     # ─── 2. Реферер (если есть) ────────────────────────────
     referrer_user_id = None
@@ -172,6 +200,7 @@ async def submit_test(
         platform_username=payload.platform.username,
         platform_first_name=payload.platform.first_name,
         referrer_user_id=referrer_user_id,
+        email=user_email,
     )
 
     # ─── 4. Записываем ответы (старые удаляются) ──────────
@@ -215,6 +244,7 @@ async def submit_test(
     await session.commit()
     logger.info(
         f"✅ Заявка #{user.lead_number} сохранена: {full_name} | {phone_clean} "
+        f"| email={user_email or '—'} "
         f"| critical={result.critical_count}, warning={result.warning_count}"
     )
 
@@ -239,12 +269,19 @@ async def submit_test(
         referrer_phone=referrer_phone,
     )
 
+    # Берём email из БД (а не из payload), чтобы учесть случай:
+    # юзер прошёл тест второй раз без email — а в БД ещё лежит старый,
+    # т.к. мы его не затираем при повторе. Тогда копию отчёта всё-таки
+    # отправим на старый адрес — это разумное поведение.
+    final_email = user.email or user_email
+
     # Запускаем отправку отчётов в фоне (юзер не ждёт)
     background_tasks.add_task(
         _send_reports_in_background,
         user_snapshot,
         engine_answers,
         result,
+        final_email,
     )
 
     # ─── 9. Возвращаем результат Mini App ──────────────────

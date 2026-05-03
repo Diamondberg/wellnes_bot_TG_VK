@@ -1,44 +1,36 @@
 """
-Отправка email-уведомлений админу.
+Отправка email-уведомлений.
 
 Использует aiosmtplib (async) — не блокирует event loop.
 
-Поддерживает:
-  - HTML-тело письма (красивая вёрстка с цветными блоками)
-  - Вложения (TXT, XLSX)
-  - Запасной путь — если email отключён в конфиге, функция просто молча выходит
+Две функции:
+  - send_lead_email   — АДМИНУ: полный отчёт + сегментация лида + Excel
+  - send_user_report  — ЮЗЕРУ:  дружелюбное письмо + таблица + дисклеймер
+                                + CTA «связаться с консультантом» + TXT
 
 Использование:
-    from core.notifier import send_lead_email
-
-    await send_lead_email(
-        user=user_snapshot,
-        result=test_result,
-        txt_bytes=...,
-        xlsx_bytes=...,
-        txt_filename="report.txt",
-        xlsx_filename="report.xlsx",
-    )
+    from core.notifier import send_lead_email, send_user_report
 """
 
 import logging
 from email.message import EmailMessage
+from html import escape
 from typing import Optional
 
 import aiosmtplib
 
 from core.config import settings
-from core.reports import UserSnapshot
+from core.reports import DISCLAIMER, UserSnapshot
 from core.test_engine import TestResult
 
 logger = logging.getLogger(__name__)
 
 
 # ════════════════════════════════════════════════════════════
-#  Шаблон HTML-письма
+#  HTML для письма АДМИНУ
 # ════════════════════════════════════════════════════════════
 def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
-    """Формируем красивый HTML для тела письма."""
+    """Формируем красивый HTML для тела письма админу (с сегментацией лида)."""
     css_map = {
         "good": ("#4CAF50", "#E8F5E9"),
         "warning": ("#FF9800", "#FFF3E0"),
@@ -61,8 +53,8 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
     if user.referrer_name:
         referrer_block = f"""
         <div style="background:#FFF8E1;border-left:4px solid #FFA000;padding:10px 14px;margin:12px 0;border-radius:4px">
-            <p style="margin:0 0 4px 0"><b>🎁 Реферал от:</b> {user.referrer_name}</p>
-            {f'<p style="margin:0;font-size:14px;color:#666">Тел: {user.referrer_phone}</p>' if user.referrer_phone else ""}
+            <p style="margin:0 0 4px 0"><b>🎁 Реферал от:</b> {escape(user.referrer_name)}</p>
+            {f'<p style="margin:0;font-size:14px;color:#666">Тел: {escape(user.referrer_phone)}</p>' if user.referrer_phone else ""}
         </div>
         """
 
@@ -72,13 +64,18 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
         system_blocks.append(f"""
         <div style="background:{bg_color};border-left:4px solid {text_color};padding:10px 14px;margin:6px 0;border-radius:4px">
             <p style="margin:0">
-                <b>{sr.status.emoji} {sr.system_name}</b> &nbsp;
+                <b>{sr.status.emoji} {escape(sr.system_name)}</b> &nbsp;
                 <span style="color:{text_color};font-weight:bold">{sr.score}/{sr.max_score} ({sr.percentage:.0f}%)</span>
             </p>
-            <p style="margin:4px 0 0 0;font-size:13px;color:#555">{sr.recommendation}</p>
+            <p style="margin:4px 0 0 0;font-size:13px;color:#555">{escape(sr.recommendation)}</p>
         </div>
         """)
     systems_html = "".join(system_blocks)
+
+    username_block = (
+        f'<p style="margin:4px 0"><b>✈️ Username:</b> @{escape(user.platform_username)}</p>'
+        if user.platform_username else ""
+    )
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
@@ -98,11 +95,11 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
       </div>
 
       <div style="background:#FAFAFA;padding:14px;border-radius:4px;margin-bottom:14px">
-        <p style="margin:4px 0"><b>👤 ФИО:</b> {user.full_name}</p>
-        <p style="margin:4px 0"><b>📱 Телефон:</b> <a href="tel:{user.phone}" style="color:#1976D2;text-decoration:none">{user.phone}</a></p>
-        <p style="margin:4px 0"><b>📡 Платформа:</b> {user.platform}</p>
+        <p style="margin:4px 0"><b>👤 ФИО:</b> {escape(user.full_name)}</p>
+        <p style="margin:4px 0"><b>📱 Телефон:</b> <a href="tel:{escape(user.phone)}" style="color:#1976D2;text-decoration:none">{escape(user.phone)}</a></p>
+        <p style="margin:4px 0"><b>📡 Платформа:</b> {escape(user.platform)}</p>
         <p style="margin:4px 0"><b>🆔 User ID:</b> <code>{user.platform_user_id}</code></p>
-        {f'<p style="margin:4px 0"><b>✈️ Username:</b> @{user.platform_username}</p>' if user.platform_username else ""}
+        {username_block}
       </div>
 
       {referrer_block}
@@ -123,7 +120,7 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
 
 
 # ════════════════════════════════════════════════════════════
-#  Отправка письма
+#  Отправка письма АДМИНУ
 # ════════════════════════════════════════════════════════════
 async def send_lead_email(
     user: UserSnapshot,
@@ -200,11 +197,211 @@ async def send_lead_email(
             password=settings.email_password,
             timeout=30,
         )
-        logger.info(f"✅ Email отправлен на {to_addr}")
+        logger.info(f"✅ Email админу отправлен на {to_addr}")
         return True
     except aiosmtplib.errors.SMTPException as e:
-        logger.error(f"❌ SMTP-ошибка при отправке email: {e}")
+        logger.error(f"❌ SMTP-ошибка при отправке письма админу: {e}")
         return False
     except Exception as e:
-        logger.error(f"❌ Не удалось отправить email: {e}")
+        logger.error(f"❌ Не удалось отправить письмо админу: {e}")
+        return False
+
+
+# ════════════════════════════════════════════════════════════
+#  HTML для письма ЮЗЕРУ
+# ════════════════════════════════════════════════════════════
+def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
+    """
+    Формируем HTML для письма ЮЗЕРУ.
+
+    Отличия от админского:
+      - дружелюбный тон ("Спасибо за прохождение")
+      - НЕТ сегментации ("горячий лид" и т.п.) — это внутренняя кухня
+      - НЕТ telegram user_id, username, инфы о реферере
+      - ЕСТЬ CTA-баннер «связаться с консультантом»
+      - дисклеймер заметнее
+    """
+    # Цвета по статусам — мягче, без "F44336" в лоб юзеру
+    css_map = {
+        "good":     ("#2E7D32", "#E8F5E9", "Всё в порядке"),
+        "warning":  ("#E65100", "#FFF3E0", "Требуется внимание"),
+        "critical": ("#C62828", "#FFEBEE", "Рекомендуется консультация"),
+    }
+
+    # Таблица результатов
+    rows_html = []
+    for sr in result.systems:
+        text_color, bg_color, status_label = css_map[sr.status.value]
+        rows_html.append(f"""
+        <tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #eee;background:{bg_color}">
+            <b>{sr.status.emoji} {escape(sr.system_name)}</b>
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:center;background:{bg_color};font-weight:bold;color:{text_color};white-space:nowrap">
+            {sr.percentage:.0f}%
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid #eee;background:{bg_color};color:{text_color};font-size:13px;white-space:nowrap">
+            {status_label}
+          </td>
+        </tr>
+        """)
+    table_rows = "".join(rows_html)
+
+    # Дисклеймер из core/reports.py — превращаем в HTML-абзацы
+    disclaimer_paragraphs = "".join(
+        f'<p style="margin:6px 0;font-size:13px;color:#555;line-height:1.6">{escape(line)}</p>'
+        for line in DISCLAIMER.split("\n") if line.strip()
+    )
+
+    consultant_url = escape(settings.consultant_contact_url)
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;line-height:1.5;color:#333;background:#f5f5f5;margin:0;padding:20px">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+
+    <!-- Шапка -->
+    <div style="background:linear-gradient(135deg,#1D9E75 0%,#34B587 100%);color:#fff;padding:28px 24px;text-align:center">
+      <h1 style="margin:0;font-size:24px;font-weight:600">🌿 Wellness Test</h1>
+      <p style="margin:8px 0 0 0;font-size:15px;opacity:0.95">Спасибо за прохождение теста!</p>
+    </div>
+
+    <div style="padding:24px">
+
+      <!-- Приветствие -->
+      <p style="margin:0 0 14px 0;font-size:15px;color:#333">
+        Здравствуйте, <b>{escape(user.full_name)}</b>!
+      </p>
+      <p style="margin:0 0 20px 0;font-size:14px;color:#555;line-height:1.6">
+        Вы прошли наш экспресс-тест на состояние основных систем организма.
+        Ниже — ваши результаты. Подробный отчёт также прикреплён к этому письму
+        в виде текстового файла.
+      </p>
+
+      <!-- Таблица результатов -->
+      <h3 style="color:#1D9E75;font-size:16px;margin:20px 0 12px 0;border-bottom:2px solid #1D9E75;padding-bottom:6px">
+        📊 Результаты по системам
+      </h3>
+      <table style="width:100%;border-collapse:collapse;border-radius:6px;overflow:hidden;margin-bottom:20px">
+        <thead>
+          <tr style="background:#FAFAFA">
+            <th style="padding:10px 12px;text-align:left;font-size:13px;color:#666;border-bottom:1px solid #ddd">Система</th>
+            <th style="padding:10px 12px;text-align:center;font-size:13px;color:#666;border-bottom:1px solid #ddd">Балл</th>
+            <th style="padding:10px 12px;text-align:left;font-size:13px;color:#666;border-bottom:1px solid #ddd">Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table_rows}
+        </tbody>
+      </table>
+
+      <!-- CTA: связаться с консультантом -->
+      <div style="background:linear-gradient(135deg,#E8F5E9 0%,#F1F8F4 100%);border:1px solid #C8E6C9;border-radius:10px;padding:18px;margin:24px 0;text-align:center">
+        <p style="margin:0 0 6px 0;font-size:15px;color:#1D9E75;font-weight:600">
+          💬 Остались вопросы?
+        </p>
+        <p style="margin:0 0 14px 0;font-size:13px;color:#555;line-height:1.5">
+          Наш консультант поможет разобраться с результатами<br>
+          и подскажет, на что стоит обратить внимание.
+        </p>
+        <a href="{consultant_url}"
+           style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:11px 24px;border-radius:8px;font-size:14px;font-weight:500">
+          Написать консультанту →
+        </a>
+      </div>
+
+      <!-- Дисклеймер -->
+      <div style="background:#FFF8E1;border-left:4px solid #FFB300;padding:14px 16px;border-radius:4px;margin-top:24px">
+        <p style="margin:0 0 8px 0;font-size:14px;color:#E65100;font-weight:600">
+          ⚠️ Важное уведомление
+        </p>
+        {disclaimer_paragraphs}
+      </div>
+
+      <!-- Подвал -->
+      <p style="margin-top:24px;padding-top:14px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;line-height:1.6">
+        Это письмо отправлено автоматически в ответ на прохождение теста.<br>
+        К письму приложен текстовый файл с подробным отчётом.<br>
+        🌿 Берегите своё здоровье!
+      </p>
+
+    </div>
+  </div>
+</body></html>"""
+
+
+# ════════════════════════════════════════════════════════════
+#  Отправка письма ЮЗЕРУ
+# ════════════════════════════════════════════════════════════
+async def send_user_report(
+    user_email: str,
+    user: UserSnapshot,
+    result: TestResult,
+    txt_bytes: bytes,
+    txt_filename: str = "report.txt",
+) -> bool:
+    """
+    Отправить юзеру копию отчёта на его email.
+
+    Отличия от send_lead_email:
+      - адресат — email юзера (берётся из формы)
+      - НЕТ Excel — только TXT
+      - HTML дружелюбный, без сегментации лида
+      - есть CTA «связаться с консультантом»
+
+    Возвращает True если отправлено, False если SMTP не настроен или ошибка.
+    Не падает при ошибках — только логирует.
+    """
+    if not user_email:
+        logger.info("📧 У юзера нет email — пропускаем")
+        return False
+
+    if not settings.email_smtp_configured:
+        logger.info("📧 SMTP не настроен — пропускаем отправку юзеру")
+        return False
+
+    subject = f"🌿 Ваши результаты Wellness Test — заявка #{user.lead_number}"
+
+    msg = EmailMessage()
+    msg["From"] = settings.email_user
+    msg["To"] = user_email
+    msg["Subject"] = subject
+
+    # Plain-text fallback (для почтовиков без HTML)
+    msg.set_content(
+        f"Здравствуйте, {user.full_name}!\n\n"
+        f"Спасибо за прохождение Wellness Test. Заявка #{user.lead_number}.\n\n"
+        f"Подробные результаты — в HTML-версии письма и приложенном файле.\n\n"
+        f"Связаться с консультантом: {settings.consultant_contact_url}\n\n"
+        f"--\n"
+        f"Это письмо отправлено автоматически.\n"
+        f"Берегите своё здоровье! 🌿"
+    )
+
+    msg.add_alternative(_build_user_html_body(user, result), subtype="html")
+
+    msg.add_attachment(
+        txt_bytes,
+        maintype="text",
+        subtype="plain",
+        filename=txt_filename,
+    )
+
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=settings.email_host,
+            port=settings.email_port,
+            start_tls=True,
+            username=settings.email_user,
+            password=settings.email_password,
+            timeout=30,
+        )
+        logger.info(f"✅ Email юзеру отправлен на {user_email}")
+        return True
+    except aiosmtplib.errors.SMTPException as e:
+        logger.error(f"❌ SMTP-ошибка при отправке письма юзеру ({user_email}): {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Не удалось отправить письмо юзеру ({user_email}): {e}")
         return False

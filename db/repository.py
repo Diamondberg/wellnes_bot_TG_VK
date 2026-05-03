@@ -99,6 +99,7 @@ async def upsert_user(
     platform_username: Optional[str] = None,
     platform_first_name: Optional[str] = None,
     referrer_user_id: Optional[int] = None,
+    email: Optional[str] = None,
 ) -> User:
     """
     Создать или обновить пользователя.
@@ -108,6 +109,12 @@ async def upsert_user(
       2. Если есть — обновляем (новые данные перетирают старые)
       3. Если нет — создаём с новым lead_number
       4. ID платформы сохраняем (один человек может прийти и через TG и через VK)
+
+    Поведение для email:
+      - При создании — пишем то, что передали (может быть None)
+      - При обновлении — пишем только если переданное значение не None.
+        То есть если юзер раз указал email, а во второй раз не указал —
+        старый email НЕ затирается. Логика "один раз дал — навсегда осталось".
     """
     user = await get_user_by_phone(session, tenant_id, phone)
 
@@ -129,6 +136,7 @@ async def upsert_user(
             tenant_id=tenant_id,
             full_name=full_name,
             phone=phone,
+            email=email,
             lead_number=lead_number,
             first_platform=platform,
             consent_at=datetime.now(timezone.utc),
@@ -145,6 +153,10 @@ async def upsert_user(
     else:
         # ─── Обновляем существующего ───────────────────────
         user.full_name = full_name
+        # Email обновляем только если передано непустое значение —
+        # не затираем старый при повторном прохождении без email
+        if email:
+            user.email = email
         # Если ID платформы ещё не был известен — записываем
         if getattr(user, pid_field) is None:
             setattr(user, pid_field, platform_user_id)

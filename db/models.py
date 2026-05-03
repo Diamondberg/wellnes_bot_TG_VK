@@ -13,6 +13,8 @@
 3. tg_user_id / vk_user_id / max_user_id — отдельные поля. Любое может быть NULL.
 4. Реферальные связи — через внутренний User.id, не через TG-ID.
    Это позволит мэтчить рефералов с разных платформ.
+5. email — опциональное поле. Если юзер указал — шлём ему копию отчёта на почту.
+   Не уникальное (один email теоретически может быть у разных людей).
 """
 
 from datetime import datetime
@@ -94,6 +96,11 @@ class User(Base):
     # ─── Контактные данные ─────────────────────────────────
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    # Email — необязательное. Если указан, шлём юзеру копию отчёта.
+    # Без unique: теоретически один email может быть у разных людей
+    # (семейный ящик и т.п.), и нам это не критично — мэтчим по телефону.
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # ─── Идентификаторы на платформах (любой может быть NULL) ─
     tg_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)

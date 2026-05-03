@@ -17,7 +17,7 @@ Naming convention:
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 # ════════════════════════════════════════════════════════════
@@ -74,6 +74,10 @@ class TestSubmitIn(BaseModel):
     """
     full_name: str = Field(..., min_length=2, max_length=255, description="ФИО клиента")
     phone: str = Field(..., min_length=10, max_length=20, description="Телефон в любом формате")
+    email: Optional[EmailStr] = Field(
+        None,
+        description="Email юзера (опционально). Если указан — пришлём копию отчёта.",
+    )
     consent: bool = Field(..., description="Согласие на обработку ПД (152-ФЗ)")
     answers: List[AnswerIn] = Field(..., min_length=36, max_length=36)
     platform: PlatformInfoIn

@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # ─── Прокси (опционально) ───────────────────────────────
     proxy_url: Optional[str] = None
 
+    # ─── Контакт консультанта ───────────────────────────────
+    # Куда вести юзера, если он хочет связаться (кнопка во фронте +
+    # CTA-баннер в письме). По умолчанию — ТГ владельца проекта.
+    consultant_contact_url: str = Field(
+        default="https://t.me/Diamondberg",
+        description="URL для связи с консультантом (TG/WhatsApp/etc)",
+    )
+
     # ─── Арендатор (Tenant) ─────────────────────────────────
     tenant_code: str = "default"
     tenant_name: str = "ИП Иванов И.И."
@@ -59,6 +67,16 @@ class Settings(BaseSettings):
     def email_enabled(self) -> bool:
         """Включены ли email-уведомления (есть все необходимые поля)."""
         return all([self.email_user, self.email_password, self.email_to])
+
+    @property
+    def email_smtp_configured(self) -> bool:
+        """
+        Настроен ли SMTP в принципе (без проверки email_to).
+
+        Используется для письма ЮЗЕРУ — там адресат берётся из формы,
+        не из конфига, поэтому email_to нам не нужен.
+        """
+        return all([self.email_user, self.email_password])
 
 
 # Единственный экземпляр настроек на всё приложение.
