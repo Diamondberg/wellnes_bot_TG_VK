@@ -45,7 +45,6 @@
         }
         .progress-fill { transition: width 0.3s ease-out; }
 
-        /* Анимация появления результатов */
         .result-row {
             opacity: 0;
             transform: translateY(8px);
@@ -99,12 +98,22 @@
                         </div>
                     </div>
 
+                    <!--
+                      Чекбокс согласия. Клик в любое место label (кроме самой ссылки на политику)
+                      открывает модалку с дисклеймером.
+                      Клик именно по ссылке "условиями и дисклеймером" открывает модалку с политикой
+                      и НЕ дёргает чекбокс — это обеспечивается @click.stop.prevent на ссылке.
+                    -->
                     <label class="flex gap-3 p-3 bg-gray-50 rounded-lg mb-4 cursor-pointer hover:bg-gray-100 transition-colors"
                            @click.prevent="onConsentClick()">
                         <input type="checkbox" :checked="consent" readonly
                                class="mt-0.5 w-4 h-4 flex-shrink-0 accent-emerald-600 cursor-pointer pointer-events-none">
                         <span class="text-[13px] text-gray-600 leading-relaxed">
-                            Я ознакомлен с <span class="text-blue-600 underline">условиями и дисклеймером</span> и согласен на обработку моих персональных данных (152-ФЗ)
+                            Я ознакомлен с
+                            <a href="#"
+                               @click.stop.prevent="modal = 'privacy'"
+                               class="text-blue-600 underline hover:text-blue-700">условиями и дисклеймером</a>
+                            и согласен на обработку моих персональных данных (152-ФЗ)
                         </span>
                     </label>
 
@@ -226,7 +235,12 @@
                             </div>
                         </div>
 
-                        <div :key="`img-${currentQuestion.number}`" class="aspect-[16/9] bg-gray-100 overflow-hidden mx-5 rounded-xl question-fade">
+                        <!--
+                          Картинка вопроса — на всю ширину, без скруглений и боковых отступов.
+                          Раньше было: aspect-[16/9] ... mx-5 rounded-xl  → как на форме.
+                          Теперь:      aspect-[16/9] ... overflow-hidden  → как на welcome/result.
+                        -->
+                        <div :key="`img-${currentQuestion.number}`" class="aspect-[16/9] bg-gray-100 overflow-hidden question-fade">
                             <img :src="`assets/images/${currentQuestion.number}.jpg`" :alt="`Вопрос ${currentQuestion.number}`"
                                  class="w-full h-full object-cover"
                                  onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += `<span class='text-gray-400 text-xs'>картинка ${this.alt} не найдена</span>`">
@@ -271,7 +285,6 @@
         <template x-if="screen === 'result'">
             <div class="screen-enter">
 
-                <!-- Состояние: отправляем ответы на бэкенд -->
                 <template x-if="result.submitting">
                     <div class="min-h-screen flex flex-col items-center justify-center px-5 py-10">
                         <div class="w-12 h-12 border-4 border-gray-200 border-t-emerald-600 rounded-full animate-spin mb-5"></div>
@@ -280,7 +293,6 @@
                     </div>
                 </template>
 
-                <!-- Состояние: ошибка отправки -->
                 <template x-if="result.error && !result.submitting">
                     <div class="min-h-screen flex flex-col items-center justify-center px-5 py-10 text-center">
                         <div class="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-4 text-3xl">⚠️</div>
@@ -291,10 +303,8 @@
                     </div>
                 </template>
 
-                <!-- Состояние: успех — показываем результаты -->
                 <template x-if="result.data && !result.submitting">
                     <div>
-                        <!-- Картинка победы -->
                         <div class="aspect-[16/9] bg-gradient-to-br from-emerald-50 to-blue-50 overflow-hidden">
                             <img src="assets/images/result.jpg" alt="Тест завершён"
                                  class="w-full h-full object-cover"
@@ -302,12 +312,10 @@
                         </div>
 
                         <div class="px-5 py-6">
-                            <!-- Заголовок -->
                             <div class="text-center mb-6">
                                 <h1 class="text-2xl font-medium text-gray-900">Вы молодец — прошли весь путь!</h1>
                             </div>
 
-                            <!-- Результаты по системам -->
                             <h2 class="text-base font-medium text-gray-900 mb-3">Результаты по системам:</h2>
 
                             <div class="space-y-2 mb-6">
@@ -327,7 +335,6 @@
                                 </template>
                             </div>
 
-                            <!-- Сообщение о консультанте -->
                             <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-5">
                                 <p class="text-[14px] text-emerald-900 leading-relaxed">
                                     📞 <span class="font-medium">С вами свяжется консультант</span>
@@ -337,7 +344,6 @@
                                 <p class="text-[12px] text-emerald-700 mt-2" x-text="`Заявка №${result.data.lead_number}`"></p>
                             </div>
 
-                            <!-- Кнопки действий -->
                             <button @click="shareWithFriends()"
                                     class="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white text-[15px] font-medium rounded-lg flex items-center justify-center gap-2 mb-3">
                                 ❤️ Поделиться с близкими
@@ -353,7 +359,6 @@
                                 🔄 Пройти тест ещё раз
                             </button>
 
-                            <!-- Дисклеймер -->
                             <div class="mt-6 pt-5 border-t border-gray-200">
                                 <h3 class="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
                                     ⚠️ Важное уведомление
@@ -426,6 +431,69 @@
             </div>
         </div>
 
+        <!-- 1b. Политика конфиденциальности -->
+        <!--
+          Открывается по клику на ссылку "условиями и дисклеймером" в чекбоксе согласия.
+          Текст пока — заглушка-черновик. Когда напишете официальный текст — замените содержимое.
+        -->
+        <div x-show="modal === 'privacy'" x-transition.opacity.duration.150ms
+             class="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
+             @click.self="modal = null">
+            <div x-show="modal === 'privacy'"
+                 x-transition:enter="transition transform duration-200"
+                 x-transition:enter-start="translate-y-8 opacity-0"
+                 x-transition:enter-end="translate-y-0 opacity-100"
+                 class="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col">
+                <div class="overflow-y-auto p-5 pt-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-3">🔒 Политика конфиденциальности</h3>
+
+                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">
+                        Мы серьёзно относимся к защите ваших персональных данных. Ниже — кратко о том,
+                        что мы собираем и зачем.
+                    </p>
+
+                    <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Какие данные собираем</h4>
+                    <ul class="space-y-1 text-sm text-gray-700 ml-1 mb-3">
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>ФИО и телефон — чтобы консультант мог с вами связаться</span></li>
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Email (если указан) — чтобы прислать копию результатов</span></li>
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Ваши ответы на 36 вопросов теста</span></li>
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Идентификатор в Telegram/VK (для распознавания при повторном визите)</span></li>
+                    </ul>
+
+                    <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Как используем</h4>
+                    <ul class="space-y-1 text-sm text-gray-700 ml-1 mb-3">
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Консультант перезвонит, чтобы обсудить результаты</span></li>
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Подберём программу здоровья под вашу ситуацию</span></li>
+                        <li class="flex gap-2"><span class="text-gray-400">•</span><span>Можем прислать копию отчёта на email</span></li>
+                    </ul>
+
+                    <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Кому передаём</h4>
+                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">
+                        Данные не передаются третьим лицам. Хранятся в защищённой базе и доступны
+                        только консультанту-владельцу.
+                    </p>
+
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4 mb-2">
+                        <p class="text-[12px] text-blue-900 leading-relaxed">
+                            ℹ️ Обработка персональных данных осуществляется в соответствии с
+                            Федеральным законом от 27.07.2006 №152-ФЗ «О персональных данных».
+                        </p>
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-3 leading-relaxed">
+                        Если хотите удалить свои данные — напишите консультанту, и мы их удалим
+                        в течение 1 рабочего дня.
+                    </p>
+                </div>
+                <div class="border-t border-gray-100 p-4 bg-white rounded-b-2xl">
+                    <button @click="modal = null"
+                            class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium rounded-lg">
+                        Понятно
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- 2. Возврат с формы -->
         <div x-show="modal === 'backFromForm'" x-transition.opacity.duration.150ms
              class="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
@@ -494,8 +562,6 @@
         const STORAGE_KEY = 'wellness_app_state_v1';
         const API_BASE = 'http://127.0.0.1:8000';
 
-        // Куда вести юзера по кнопке "Связаться с консультантом".
-        // Должно совпадать с CONSULTANT_CONTACT_URL на бэкенде (core/config.py).
         const CONSULTANT_CONTACT_URL = 'https://t.me/Diamondberg';
 
         const COUNTRIES = [
@@ -528,12 +594,11 @@
                 result: {
                     submitting: false,
                     error: null,
-                    data: null,        // {lead_number, systems: [...]}
+                    data: null,
                 },
 
                 countries: COUNTRIES,
 
-                // ─── Computed ────────────────────────────────
                 get currentCountry() { return this.countries[this.form.countryIdx] || this.countries[0]; },
                 get validFullName() {
                     const trimmed = this.form.fullName.trim();
@@ -556,7 +621,6 @@
                     return Math.round(((this.test.currentIndex + 1) / this.test.questions.length) * 100);
                 },
 
-                // ─── Цвета для системы ──────────────────────
                 systemColors(status) {
                     const map = {
                         good:     { emoji: '✅', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Всё в порядке' },
@@ -566,7 +630,6 @@
                     return map[status] || map.good;
                 },
 
-                // ─── Lifecycle ──────────────────────────────
                 init() {
                     this.loadState();
                     this.$watch('consent', () => this.saveState());
@@ -615,7 +678,6 @@
                     } catch (e) { console.warn('load failed:', e); }
                 },
 
-                // ─── Welcome ─────────────────────────────────
                 onConsentClick() {
                     if (this.consent) { this.consent = false; return; }
                     this.modal = 'disclaimer';
@@ -623,7 +685,6 @@
                 acceptDisclaimer() { this.consent = true; this.modal = null; },
                 declineDisclaimer() { this.consent = false; this.modal = null; },
 
-                // ─── API: загрузка вопросов ──────────────────
                 async loadQuestions() {
                     this.test.loading = true; this.test.error = null;
                     try {
@@ -640,21 +701,16 @@
                     }
                 },
 
-                // ─── API: отправка результатов ───────────────
                 async submitTest() {
                     this.result.submitting = true;
                     this.result.error = null;
 
-                    // Собираем payload в формате который ждёт API
                     const answers = [];
                     for (const q of this.test.questions) {
                         const ans = this.test.answers[q.number];
                         if (ans) answers.push({ question_number: q.number, answer: ans });
                     }
 
-                    // Email — только если указан и валиден.
-                    // Пустую строку/невалидное превращаем в null,
-                    // чтобы Pydantic не ругался на формат.
                     const emailTrim = this.form.email.trim();
                     const emailToSend = (emailTrim && EMAIL_RE.test(emailTrim))
                         ? emailTrim
@@ -672,7 +728,6 @@
                             username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username || null,
                             first_name: window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name || null,
                         },
-                        // referrer_platform_id: пока null, добавим в Шаге 5
                     };
 
                     try {
@@ -696,7 +751,6 @@
                     }
                 },
 
-                // ─── Переходы ────────────────────────────────
                 goToForm() {
                     if (!this.consent) return;
                     this.screen = 'form'; window.scrollTo(0, 0);
@@ -717,7 +771,6 @@
                     const qNum = this.currentQuestion.number;
                     this.test.answers[qNum] = answer;
 
-                    // Последний вопрос → переходим на result
                     if (this.test.currentIndex === this.test.questions.length - 1) {
                         this.screen = 'result';
                         window.scrollTo(0, 0);
@@ -745,15 +798,11 @@
                 confirmExitTest() { this.modal = 'exitTest'; },
                 confirmExitTestYes() { this.modal = null; this.screen = 'form'; },
 
-                // ─── Связаться с консультантом ──────────────
                 contactConsultant() {
-                    // В Telegram WebApp используем нативный openTelegramLink
-                    // для t.me-ссылок (открывает чат прямо в TG, не в браузере).
                     if (window.Telegram?.WebApp && CONSULTANT_CONTACT_URL.includes('t.me/')) {
                         window.Telegram.WebApp.openTelegramLink(CONSULTANT_CONTACT_URL);
                         return;
                     }
-                    // Если не t.me-ссылка (например wa.me) или не TG WebApp — обычный openLink/window.open
                     if (window.Telegram?.WebApp?.openLink) {
                         window.Telegram.WebApp.openLink(CONSULTANT_CONTACT_URL);
                         return;
@@ -761,10 +810,7 @@
                     window.open(CONSULTANT_CONTACT_URL, '_blank', 'noopener');
                 },
 
-                // ─── Поделиться с близкими ──────────────────
                 shareWithFriends() {
-                    // В Шаге 5 это будет ссылка вида https://t.me/wellness_test_bot?start=invite_<tg_user_id>
-                    // Сейчас — просто на главную приложения
                     const referralUrl = window.location.origin + '/';
                     const shareText =
                         "⏱ 2 МИНУТЫ НА ГЛАВНОЕ\n\n" +
@@ -774,14 +820,12 @@
                         "• 36 вопросов\n• 2 минуты\n• Без диагнозов, без стресса\n\n" +
                         "🌿 Всего две минуты, а пользы на долгие годы!";
 
-                    // Если в Telegram — используем нативный share
                     if (window.Telegram?.WebApp) {
                         const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${encodeURIComponent(shareText)}`;
                         window.Telegram.WebApp.openTelegramLink(tgShareUrl);
                         return;
                     }
 
-                    // Иначе — копируем в буфер и показываем уведомление
                     const fullText = `${shareText}\n\n${referralUrl}`;
                     if (navigator.clipboard) {
                         navigator.clipboard.writeText(fullText).then(() => {
@@ -792,10 +836,8 @@
                     }
                 },
 
-                // ─── Перезапуск теста ───────────────────────
                 confirmRestartTest() { this.modal = 'restartTest'; },
                 confirmRestartYes() {
-                    // Полная очистка
                     this.consent = false;
                     this.form.fullName = ''; this.form.fullNameTouched = false;
                     this.form.countryIdx = 0;

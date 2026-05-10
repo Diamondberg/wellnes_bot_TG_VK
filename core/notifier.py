@@ -4,9 +4,10 @@
 Использует aiosmtplib (async) — не блокирует event loop.
 
 Две функции:
-  - send_lead_email   — АДМИНУ: полный отчёт + сегментация лида + Excel
+  - send_lead_email   — АДМИНУ: полный отчёт + сегментация лида + Excel + TXT
   - send_user_report  — ЮЗЕРУ:  дружелюбное письмо + таблица + дисклеймер
-                                + CTA «связаться с консультантом» + TXT
+                                + CTA «связаться с консультантом»
+                                + баннер магазина (БЕЗ вложений)
 
 Использование:
     from core.notifier import send_lead_email, send_user_report
@@ -208,6 +209,45 @@ async def send_lead_email(
 
 
 # ════════════════════════════════════════════════════════════
+#  Баннер магазина для письма ЮЗЕРУ
+# ════════════════════════════════════════════════════════════
+def _build_shop_banner_html() -> str:
+    """
+    Баннер «загляните в магазин» под кнопкой консультанта.
+
+    Сейчас: один статичный баннер из настроек.
+
+    В будущем (отдельный шаг): здесь будет логика выбора баннера в зависимости
+    от результатов теста — например, разные офферы для проблем с ЖКТ,
+    нервной системой и т.д. Поэтому функция уже изолирована — потом просто
+    примет на вход TestResult и будет выбирать нужный шаблон.
+    """
+    title = escape(settings.shop_banner_title)
+    text = escape(settings.shop_banner_text)
+    button = escape(settings.shop_banner_button)
+    url = escape(settings.shop_banner_url)
+    emoji = settings.shop_banner_emoji  # эмодзи не эскейпим — это юникод-символ
+
+    # Тёплый оранжево-розовый градиент — отличается от зелёного консультанта,
+    # чтобы юзер визуально различал «связаться» и «магазин»
+    return f"""
+    <div style="background:linear-gradient(135deg,#FFF3E0 0%,#FCE4EC 100%);border:1px solid #FFCCBC;border-radius:10px;padding:20px;margin:16px 0;text-align:center">
+        <div style="font-size:32px;line-height:1;margin-bottom:8px">{emoji}</div>
+        <p style="margin:0 0 6px 0;font-size:15px;color:#BF360C;font-weight:600">
+          {title}
+        </p>
+        <p style="margin:0 0 14px 0;font-size:13px;color:#5D4037;line-height:1.5">
+          {text}
+        </p>
+        <a href="{url}"
+           style="display:inline-block;background:#FF7043;color:#fff;text-decoration:none;padding:11px 24px;border-radius:8px;font-size:14px;font-weight:500">
+          {button}
+        </a>
+    </div>
+    """
+
+
+# ════════════════════════════════════════════════════════════
 #  HTML для письма ЮЗЕРУ
 # ════════════════════════════════════════════════════════════
 def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
@@ -219,6 +259,7 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
       - НЕТ сегментации ("горячий лид" и т.п.) — это внутренняя кухня
       - НЕТ telegram user_id, username, инфы о реферере
       - ЕСТЬ CTA-баннер «связаться с консультантом»
+      - ЕСТЬ баннер магазина под ним
       - дисклеймер заметнее
     """
     # Цвета по статусам — мягче, без "F44336" в лоб юзеру
@@ -254,6 +295,7 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
     )
 
     consultant_url = escape(settings.consultant_contact_url)
+    shop_banner = _build_shop_banner_html()
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
@@ -274,8 +316,8 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
       </p>
       <p style="margin:0 0 20px 0;font-size:14px;color:#555;line-height:1.6">
         Вы прошли наш экспресс-тест на состояние основных систем организма.
-        Ниже — ваши результаты. Подробный отчёт также прикреплён к этому письму
-        в виде текстового файла.
+        Ниже — ваши результаты. Скоро с вами свяжется консультант
+        для подробной расшифровки.
       </p>
 
       <!-- Таблица результатов -->
@@ -296,7 +338,7 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
       </table>
 
       <!-- CTA: связаться с консультантом -->
-      <div style="background:linear-gradient(135deg,#E8F5E9 0%,#F1F8F4 100%);border:1px solid #C8E6C9;border-radius:10px;padding:18px;margin:24px 0;text-align:center">
+      <div style="background:linear-gradient(135deg,#E8F5E9 0%,#F1F8F4 100%);border:1px solid #C8E6C9;border-radius:10px;padding:18px;margin:24px 0 0 0;text-align:center">
         <p style="margin:0 0 6px 0;font-size:15px;color:#1D9E75;font-weight:600">
           💬 Остались вопросы?
         </p>
@@ -310,6 +352,9 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
         </a>
       </div>
 
+      <!-- Баннер магазина (под кнопкой консультанта) -->
+      {shop_banner}
+
       <!-- Дисклеймер -->
       <div style="background:#FFF8E1;border-left:4px solid #FFB300;padding:14px 16px;border-radius:4px;margin-top:24px">
         <p style="margin:0 0 8px 0;font-size:14px;color:#E65100;font-weight:600">
@@ -321,7 +366,6 @@ def _build_user_html_body(user: UserSnapshot, result: TestResult) -> str:
       <!-- Подвал -->
       <p style="margin-top:24px;padding-top:14px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;line-height:1.6">
         Это письмо отправлено автоматически в ответ на прохождение теста.<br>
-        К письму приложен текстовый файл с подробным отчётом.<br>
         🌿 Берегите своё здоровье!
       </p>
 
@@ -337,17 +381,16 @@ async def send_user_report(
     user_email: str,
     user: UserSnapshot,
     result: TestResult,
-    txt_bytes: bytes,
-    txt_filename: str = "report.txt",
 ) -> bool:
     """
     Отправить юзеру копию отчёта на его email.
 
     Отличия от send_lead_email:
       - адресат — email юзера (берётся из формы)
-      - НЕТ Excel — только TXT
+      - НЕТ вложений вообще (ни TXT, ни Excel) — всё в HTML-теле
       - HTML дружелюбный, без сегментации лида
       - есть CTA «связаться с консультантом»
+      - есть баннер магазина
 
     Возвращает True если отправлено, False если SMTP не настроен или ошибка.
     Не падает при ошибках — только логирует.
@@ -367,11 +410,13 @@ async def send_user_report(
     msg["To"] = user_email
     msg["Subject"] = subject
 
-    # Plain-text fallback (для почтовиков без HTML)
+    # Plain-text fallback (для почтовиков без HTML).
+    # Не дублируем сюда детальный отчёт — этот текст видят только в редких
+    # клиентах без HTML-рендеринга, которых ~0%.
     msg.set_content(
         f"Здравствуйте, {user.full_name}!\n\n"
         f"Спасибо за прохождение Wellness Test. Заявка #{user.lead_number}.\n\n"
-        f"Подробные результаты — в HTML-версии письма и приложенном файле.\n\n"
+        f"Подробные результаты — в HTML-версии этого письма.\n\n"
         f"Связаться с консультантом: {settings.consultant_contact_url}\n\n"
         f"--\n"
         f"Это письмо отправлено автоматически.\n"
@@ -380,12 +425,8 @@ async def send_user_report(
 
     msg.add_alternative(_build_user_html_body(user, result), subtype="html")
 
-    msg.add_attachment(
-        txt_bytes,
-        maintype="text",
-        subtype="plain",
-        filename=txt_filename,
-    )
+    # ВАЖНО: НИКАКИХ вложений в письме юзеру.
+    # Полный детальный отчёт (TXT/Excel) идёт ТОЛЬКО админу, см. send_lead_email.
 
     try:
         await aiosmtplib.send(

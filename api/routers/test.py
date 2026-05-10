@@ -4,7 +4,7 @@ Endpoint сабмита теста.
 POST /api/test/submit
   Принимает данные пользователя и 36 ответов от Mini App.
   Сохраняет в БД, считает результат, отправляет email админу (в фоне).
-  Если юзер указал свой email — шлёт ему копию отчёта (в фоне).
+  Если юзер указал свой email — шлёт ему копию отчёта (в фоне, без вложений).
   Возвращает Mini App результат для показа.
 """
 
@@ -65,10 +65,10 @@ async def _send_reports_in_background(
     """
     Запускается ПОСЛЕ того как API вернул ответ Mini App.
     Делает:
-      1. Генерирует TXT и Excel
+      1. Генерирует TXT и Excel (это нужно для админа)
       2. Сохраняет локально
-      3. Шлёт email админу (TXT + Excel)
-      4. Если у юзера есть email — шлёт ему копию (только TXT)
+      3. Шлёт email админу (с TXT + Excel во вложениях)
+      4. Если у юзера есть email — шлёт ему HTML-письмо БЕЗ вложений
 
     Если что-то пошло не так — только логирует. Юзер уже получил свой
     result, повторно не дёргаем.
@@ -77,7 +77,7 @@ async def _send_reports_in_background(
         txt_bytes = generate_txt_report(user_snapshot, answers, result)
         xlsx_bytes = generate_excel_report(user_snapshot, answers, result)
 
-        # Сохраняем локально
+        # Сохраняем локально (для архива/отладки)
         txt_path, xlsx_path = build_report_paths(
             full_name=user_snapshot.full_name,
             lead_number=user_snapshot.lead_number,
@@ -98,17 +98,15 @@ async def _send_reports_in_background(
         )
 
         # Шлём копию юзеру, если он дал email.
-        # Отдельный try/except — чтобы упавшая отправка юзеру
-        # не помешала остальной обработке (хотя send_user_report
-        # сам по себе не должен бросать исключения — он их ловит).
+        # ВАЖНО: юзеру НЕ передаём TXT/Excel — у него только HTML с таблицей.
+        # Отдельный try/except — чтобы упавшая отправка юзеру не помешала
+        # остальной обработке (хотя send_user_report сам ловит исключения).
         if user_email:
             try:
                 await send_user_report(
                     user_email=user_email,
                     user=user_snapshot,
                     result=result,
-                    txt_bytes=txt_bytes,
-                    txt_filename=txt_path.name,
                 )
             except Exception as e:
                 logger.error(
@@ -170,7 +168,6 @@ async def submit_test(
     # ─── 2. Реферер (если есть) ────────────────────────────
     referrer_user_id = None
     if payload.referrer_platform_id is not None:
-        # Находим реферера по его ID на ТОЙ ЖЕ платформе
         referrer = await repo.get_user_by_platform_id(
             session,
             tenant_id=tenant.id,
@@ -204,13 +201,11 @@ async def submit_test(
     )
 
     # ─── 4. Записываем ответы (старые удаляются) ──────────
-    # Каждый ответ может породить несколько строк (один вопрос → много систем).
     db_answers = []
     for ans in payload.answers:
         try:
             question = get_question(ans.question_number)
         except ValueError:
-            # Пропускаем неизвестные номера, не падаем
             logger.warning(f"⚠️ Пришёл неизвестный номер вопроса: {ans.question_number}")
             continue
         for sys_code in question.systems:
@@ -249,7 +244,6 @@ async def submit_test(
     )
 
     # ─── 8. Готовим snapshot для отчётов и шлём в фон ──────
-    # Достанем реферера если есть (для красивого email админу)
     referrer_name = None
     referrer_phone = None
     if referrer_user_id is not None:
@@ -275,7 +269,6 @@ async def submit_test(
     # отправим на старый адрес — это разумное поведение.
     final_email = user.email or user_email
 
-    # Запускаем отправку отчётов в фоне (юзер не ждёт)
     background_tasks.add_task(
         _send_reports_in_background,
         user_snapshot,
