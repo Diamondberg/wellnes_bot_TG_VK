@@ -35,3 +35,9 @@ logs/
 # Временные файлы отчётов
 output/
 *.xlsx.tmp
+
+# Reports
+test_output_report.*
+output/
+*.rar
+*.zip

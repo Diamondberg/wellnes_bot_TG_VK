@@ -27,7 +27,19 @@ class Settings(BaseSettings):
 
     # ─── Telegram ───────────────────────────────────────────
     bot_token: str = Field(..., description="Токен Telegram-бота")
+    bot_username: str = Field(
+        default="WellnessTest_bot",
+        description="Юзернейм бота БЕЗ @. Используется в реферальных ссылках.",
+    )
     admin_id: int = Field(..., description="Telegram ID админа для уведомлений")
+
+    # URL Mini App (фронта). На локалке это ngrok-ссылка типа https://abc.ngrok-free.app/
+    # На проде — поддомен типа https://app.wellnesstest.ru/
+    # Бот использует этот URL чтобы открыть Mini App кнопкой WebApp.
+    mini_app_url: str = Field(
+        default="http://127.0.0.1:5500",
+        description="HTTPS URL Mini App (TG требует HTTPS для WebApp)",
+    )
 
     # ─── База данных ────────────────────────────────────────
     database_url: str = Field(
@@ -46,19 +58,12 @@ class Settings(BaseSettings):
     proxy_url: Optional[str] = None
 
     # ─── Контакт консультанта ───────────────────────────────
-    # Куда вести юзера, если он хочет связаться (кнопка во фронте +
-    # CTA-баннер в письме). По умолчанию — ТГ владельца проекта.
     consultant_contact_url: str = Field(
         default="https://t.me/Diamondberg",
         description="URL для связи с консультантом (TG/WhatsApp/etc)",
     )
 
     # ─── Баннер магазина в письме ───────────────────────────
-    # Под CTA-консультантом в письме юзеру показываем баннер-заглушку:
-    # «Пока ждёте звонка — загляните к нам».
-    # В будущем (отдельный шаг) сделаем умный выбор баннера в зависимости
-    # от результатов теста (программа ЖКТ, полная программа здоровья и т.п.).
-    # Сейчас — один статичный из конфига.
     shop_banner_url: str = Field(
         default="https://tentorium.ru",
         description="URL магазина/группы/канала в баннере письма",
@@ -97,15 +102,15 @@ class Settings(BaseSettings):
 
     @property
     def email_smtp_configured(self) -> bool:
-        """
-        Настроен ли SMTP в принципе (без проверки email_to).
-
-        Используется для письма ЮЗЕРУ — там адресат берётся из формы,
-        не из конфига, поэтому email_to нам не нужен.
-        """
+        """SMTP настроен (для писем юзеру/рефереру — без email_to)."""
         return all([self.email_user, self.email_password])
 
+    def referral_link(self, platform_user_id: int) -> str:
+        """
+        Сгенерировать реферальную ссылку для пользователя.
+        Пример: https://t.me/WellnessTest_bot?start=invite_12345
+        """
+        return f"https://t.me/{self.bot_username}?start=invite_{platform_user_id}"
 
-# Единственный экземпляр настроек на всё приложение.
-# При импорте этого модуля произойдёт чтение .env и валидация.
+
 settings = Settings()

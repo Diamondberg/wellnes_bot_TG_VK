@@ -3,8 +3,9 @@ Endpoint сабмита теста.
 
 POST /api/test/submit
   Принимает данные пользователя и 36 ответов от Mini App.
-  Сохраняет в БД, считает результат, отправляет email админу (в фоне).
-  Если юзер указал свой email — шлёт ему копию отчёта (в фоне, без вложений).
+  Сохраняет в БД, считает результат.
+  В фоне: шлёт email админу, копию юзеру (если email есть),
+  и УВЕДОМЛЕНИЯ РЕФЕРЕРУ (новое в Шаге 5.1).
   Возвращает Mini App результат для показа.
 """
 
@@ -21,7 +22,12 @@ from api.schemas import (
     TestSubmitOut,
     SystemResultOut,
 )
-from core.notifier import send_lead_email, send_user_report
+from bot.notify import send_referrer_notification_tg
+from core.notifier import (
+    send_lead_email,
+    send_referrer_notification_email,
+    send_user_report,
+)
 from core.questions import get_question
 from core.reports import (
     UserSnapshot,
@@ -31,7 +37,7 @@ from core.reports import (
 from core.test_engine import AnswerInput, calculate_result
 from core.utils import build_report_paths
 from db import repository as repo
-from db.models import Tenant
+from db.models import Tenant, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,40 +50,67 @@ PHONE_RE = re.compile(r"^(\+7|7|8)?\d{10,14}$")
 
 
 def normalize_phone(raw: str) -> str:
-    """Очищает телефон: убирает скобки/дефисы/пробелы."""
     return re.sub(r"[\s\(\)\-]", "", raw)
 
 
 def validate_phone(raw: str) -> bool:
-    """Проверка формата телефона."""
     return bool(PHONE_RE.match(normalize_phone(raw)))
 
 
+def _first_name_from_full_name(full_name: str) -> str:
+    """
+    Достать имя из ФИО для приватного уведомления рефереру.
+    «Иванов Иван Иванович» → «Иван».
+    Если что-то не парсится — возвращаем целиком (защита от сюрпризов).
+    """
+    parts = full_name.strip().split()
+    if len(parts) >= 2:
+        # Вторая часть — обычно имя (если ФИО введено в формате Фамилия Имя ...)
+        return parts[1]
+    return full_name.strip()
+
+
 # ════════════════════════════════════════════════════════════
-#  Background-задача: отчёты + письма
+#  Снимок реферера (для безопасной передачи в фоновую задачу)
+# ════════════════════════════════════════════════════════════
+class ReferrerSnapshot:
+    """
+    Маленький DTO с данными реферера для уведомлений.
+    Создаётся в основной таске, передаётся в фоновую — чтобы фоновая
+    не дёргала БД ещё раз.
+    """
+    __slots__ = ("name", "email", "tg_user_id")
+
+    def __init__(self, name: str, email: str | None, tg_user_id: int | None):
+        self.name = name
+        self.email = email
+        self.tg_user_id = tg_user_id
+
+
+# ════════════════════════════════════════════════════════════
+#  Background-задача: отчёты + уведомления
 # ════════════════════════════════════════════════════════════
 async def _send_reports_in_background(
     user_snapshot: UserSnapshot,
     answers: list,
     result,
     user_email: str | None,
+    referrer_snapshot: ReferrerSnapshot | None,
 ) -> None:
     """
     Запускается ПОСЛЕ того как API вернул ответ Mini App.
     Делает:
-      1. Генерирует TXT и Excel (это нужно для админа)
+      1. Генерирует TXT и Excel
       2. Сохраняет локально
-      3. Шлёт email админу (с TXT + Excel во вложениях)
-      4. Если у юзера есть email — шлёт ему HTML-письмо БЕЗ вложений
-
-    Если что-то пошло не так — только логирует. Юзер уже получил свой
-    result, повторно не дёргаем.
+      3. Шлёт email админу (TXT + Excel)
+      4. Если у юзера есть email — шлёт ему HTML
+      5. Если есть реферер — шлём ему уведомления (email + TG, что доступно)
     """
     try:
         txt_bytes = generate_txt_report(user_snapshot, answers, result)
         xlsx_bytes = generate_excel_report(user_snapshot, answers, result)
 
-        # Сохраняем локально (для архива/отладки)
+        # Локальное сохранение
         txt_path, xlsx_path = build_report_paths(
             full_name=user_snapshot.full_name,
             lead_number=user_snapshot.lead_number,
@@ -87,7 +120,7 @@ async def _send_reports_in_background(
         xlsx_path.write_bytes(xlsx_bytes)
         logger.info(f"💾 Отчёты сохранены: {txt_path.name}")
 
-        # Шлём email админу (с TXT + Excel)
+        # Email админу
         await send_lead_email(
             user=user_snapshot,
             result=result,
@@ -97,10 +130,7 @@ async def _send_reports_in_background(
             xlsx_filename=xlsx_path.name,
         )
 
-        # Шлём копию юзеру, если он дал email.
-        # ВАЖНО: юзеру НЕ передаём TXT/Excel — у него только HTML с таблицей.
-        # Отдельный try/except — чтобы упавшая отправка юзеру не помешала
-        # остальной обработке (хотя send_user_report сам ловит исключения).
+        # Email юзеру
         if user_email:
             try:
                 await send_user_report(
@@ -113,6 +143,38 @@ async def _send_reports_in_background(
                     f"❌ Не удалось отправить отчёт юзеру ({user_email}): {e}",
                     exc_info=True,
                 )
+
+        # ─── Уведомления рефереру (новое в Шаге 5.1) ───
+        if referrer_snapshot is not None:
+            referred_first_name = _first_name_from_full_name(user_snapshot.full_name)
+
+            # Email — если у реферера есть email
+            if referrer_snapshot.email:
+                try:
+                    await send_referrer_notification_email(
+                        referrer_email=referrer_snapshot.email,
+                        referrer_name=referrer_snapshot.name,
+                        referred_first_name=referred_first_name,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"❌ Email рефереру не ушёл ({referrer_snapshot.email}): {e}",
+                        exc_info=True,
+                    )
+
+            # TG — если реферер когда-то открывал нашего бота
+            if referrer_snapshot.tg_user_id:
+                try:
+                    await send_referrer_notification_tg(
+                        referrer_tg_id=referrer_snapshot.tg_user_id,
+                        referrer_name=referrer_snapshot.name,
+                        referred_first_name=referred_first_name,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"❌ TG-уведомление рефереру не ушло (id={referrer_snapshot.tg_user_id}): {e}",
+                        exc_info=True,
+                    )
 
     except Exception as e:
         logger.error(f"❌ Ошибка в фоновой обработке: {e}", exc_info=True)
@@ -134,18 +196,15 @@ async def submit_test(
     tenant: Tenant = Depends(get_current_tenant),
 ) -> TestSubmitOut:
     """
-    Главный endpoint API.
-
     Шаги:
-      1. Валидация телефона и согласия
-      2. Если есть referrer_platform_id — найти реферера в БД
-      3. Создать/обновить пользователя в БД (с email если указан)
-      4. Записать ответы (старые удаляются — повторное прохождение)
-      5. Создать реферальную связь (если есть)
-      6. Подсчитать результат
-      7. Закоммитить в БД
-      8. Запустить отправку отчётов в фоне (админу + юзеру)
-      9. Вернуть результат Mini App
+      1. Валидация
+      2. Поиск реферера (если передан referrer_platform_id)
+      3. Создание/обновление юзера + сохранение ответов + реф-связи
+      4. Подсчёт результата
+      5. Коммит
+      6. Снимок реферера для фоновой задачи
+      7. Запуск фоновой отправки отчётов и уведомлений
+      8. Возврат результата Mini App
     """
     # ─── 1. Валидация ──────────────────────────────────────
     if not payload.consent:
@@ -162,31 +221,46 @@ async def submit_test(
 
     phone_clean = normalize_phone(payload.phone)
     full_name = payload.full_name.strip()
-    # EmailStr → строка. None если не указан.
     user_email = str(payload.email).strip().lower() if payload.email else None
 
-    # ─── 2. Реферер (если есть) ────────────────────────────
-    referrer_user_id = None
+    # ─── 2. Реферер ────────────────────────────────────────
+    referrer_user: User | None = None
     if payload.referrer_platform_id is not None:
-        referrer = await repo.get_user_by_platform_id(
+        referrer_user = await repo.get_user_by_platform_id(
             session,
             tenant_id=tenant.id,
             platform=payload.platform.platform,
             platform_user_id=payload.referrer_platform_id,
         )
-        if referrer is not None:
-            referrer_user_id = referrer.id
-            logger.info(
-                f"🎁 Реферер найден: {referrer.full_name} (id={referrer.id}) "
-                f"для нового лида с телефоном {phone_clean}"
-            )
+
+        if referrer_user is not None:
+            # Защита от самореференса (если юзер каким-то образом передал
+            # СВОЙ id как референсера — например бага во фронте). Не бьём
+            # ошибкой, просто игнорируем.
+            if (
+                referrer_user.tg_user_id == payload.platform.user_id
+                and payload.platform.platform == "telegram"
+            ):
+                logger.warning(
+                    f"⚠️ Самореференс отклонён: юзер {payload.platform.user_id} "
+                    f"передал свой же tg_id как реферер"
+                )
+                referrer_user = None
+            else:
+                logger.info(
+                    f"🎁 Реферер найден: {referrer_user.full_name} "
+                    f"(id={referrer_user.id}) для нового лида с {phone_clean}"
+                )
         else:
             logger.info(
-                f"🎁 Реферер с {payload.platform.platform}_id={payload.referrer_platform_id} "
-                f"в БД не найден — новый юзер пришёл по битой ссылке"
+                f"🎁 Реферер с {payload.platform.platform}_id="
+                f"{payload.referrer_platform_id} в БД не найден — "
+                f"новый юзер пришёл по битой ссылке"
             )
 
-    # ─── 3. Создаём/обновляем пользователя ─────────────────
+    referrer_user_id = referrer_user.id if referrer_user else None
+
+    # ─── 3. Создаём/обновляем юзера ───────────────────────
     user = await repo.upsert_user(
         session,
         tenant_id=tenant.id,
@@ -200,13 +274,13 @@ async def submit_test(
         email=user_email,
     )
 
-    # ─── 4. Записываем ответы (старые удаляются) ──────────
+    # ─── 4. Записываем ответы ─────────────────────────────
     db_answers = []
     for ans in payload.answers:
         try:
             question = get_question(ans.question_number)
         except ValueError:
-            logger.warning(f"⚠️ Пришёл неизвестный номер вопроса: {ans.question_number}")
+            logger.warning(f"⚠️ Неизвестный номер вопроса: {ans.question_number}")
             continue
         for sys_code in question.systems:
             db_answers.append({
@@ -217,7 +291,7 @@ async def submit_test(
 
     await repo.replace_user_answers(session, user_id=user.id, answers=db_answers)
 
-    # ─── 5. Реферальная связь ──────────────────────────────
+    # ─── 5. Реф-связь ──────────────────────────────────────
     if referrer_user_id is not None:
         await repo.link_referral(
             session,
@@ -228,29 +302,33 @@ async def submit_test(
             referred_user_id=user.id,
         )
 
-    # ─── 6. Подсчёт результата ─────────────────────────────
+    # ─── 6. Подсчёт ────────────────────────────────────────
     engine_answers = [
         AnswerInput(question_number=a.question_number, answer=a.answer)
         for a in payload.answers
     ]
     result = calculate_result(engine_answers)
 
-    # ─── 7. Коммит в БД ────────────────────────────────────
+    # ─── 7. Коммит ─────────────────────────────────────────
     await session.commit()
     logger.info(
         f"✅ Заявка #{user.lead_number} сохранена: {full_name} | {phone_clean} "
-        f"| email={user_email or '—'} "
+        f"| email={user_email or '—'} | referrer={referrer_user_id or '—'} "
         f"| critical={result.critical_count}, warning={result.warning_count}"
     )
 
-    # ─── 8. Готовим snapshot для отчётов и шлём в фон ──────
-    referrer_name = None
-    referrer_phone = None
-    if referrer_user_id is not None:
-        referrer_for_snapshot = await repo.get_referrer_for_user(session, user.id)
-        if referrer_for_snapshot is not None:
-            referrer_name = referrer_for_snapshot.full_name
-            referrer_phone = referrer_for_snapshot.phone
+    # ─── 8. Снимок реферера (для фоновой задачи) ──────────
+    referrer_snapshot: ReferrerSnapshot | None = None
+    if referrer_user is not None:
+        referrer_snapshot = ReferrerSnapshot(
+            name=referrer_user.full_name,
+            email=referrer_user.email,
+            tg_user_id=referrer_user.tg_user_id,
+        )
+
+    # ─── 9. Snapshot текущего юзера для отчётов ──────────
+    referrer_name_for_admin = referrer_user.full_name if referrer_user else None
+    referrer_phone_for_admin = referrer_user.phone if referrer_user else None
 
     user_snapshot = UserSnapshot(
         lead_number=user.lead_number,
@@ -259,25 +337,23 @@ async def submit_test(
         platform=payload.platform.platform,
         platform_user_id=payload.platform.user_id,
         platform_username=payload.platform.username,
-        referrer_name=referrer_name,
-        referrer_phone=referrer_phone,
+        referrer_name=referrer_name_for_admin,
+        referrer_phone=referrer_phone_for_admin,
     )
 
-    # Берём email из БД (а не из payload), чтобы учесть случай:
-    # юзер прошёл тест второй раз без email — а в БД ещё лежит старый,
-    # т.к. мы его не затираем при повторе. Тогда копию отчёта всё-таки
-    # отправим на старый адрес — это разумное поведение.
     final_email = user.email or user_email
 
+    # ─── 10. Фоновая задача ────────────────────────────────
     background_tasks.add_task(
         _send_reports_in_background,
         user_snapshot,
         engine_answers,
         result,
         final_email,
+        referrer_snapshot,
     )
 
-    # ─── 9. Возвращаем результат Mini App ──────────────────
+    # ─── 11. Ответ Mini App ────────────────────────────────
     return TestSubmitOut(
         lead_number=user.lead_number,
         systems=[

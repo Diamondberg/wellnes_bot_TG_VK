@@ -53,6 +53,34 @@
         @keyframes rowIn {
             to { opacity: 1; transform: translateY(0); }
         }
+
+        /* Блок «скопируй и отправь» — выделяется при клике одним движением */
+        .copyable {
+            user-select: all;
+            -webkit-user-select: all;
+            cursor: text;
+        }
+
+        /* Тост-уведомление «скопировано» */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1D9E75;
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 100;
+            animation: toastIn 0.2s ease-out;
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translate(-50%, 8px); }
+            to   { opacity: 1; transform: translate(-50%, 0); }
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -72,6 +100,16 @@
                 <div class="px-5 py-6">
                     <h1 class="text-2xl font-medium text-gray-900 mb-1">Wellness Test</h1>
                     <p class="text-sm text-emerald-600 font-medium mb-5">⏱ 2 минуты на главное</p>
+
+                    <!-- Если юзер пришёл по реферальной ссылке — мягко это отметить -->
+                    <div x-show="referrerPlatformId !== null"
+                         class="bg-pink-50 border border-pink-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+                        <span class="text-xl flex-shrink-0">❤️</span>
+                        <p class="text-[13px] text-pink-900 leading-relaxed">
+                            <b>Вас пригласил друг.</b> Спасибо, что откликнулись —
+                            это правда важно для тех, кто заботится о вас.
+                        </p>
+                    </div>
 
                     <p class="text-[15px] text-gray-700 leading-relaxed mb-2">
                         Мы часто откладываем заботу о здоровье <span class="text-gray-900 font-medium">«на потом»</span>.
@@ -98,12 +136,6 @@
                         </div>
                     </div>
 
-                    <!--
-                      Чекбокс согласия. Клик в любое место label (кроме самой ссылки на политику)
-                      открывает модалку с дисклеймером.
-                      Клик именно по ссылке "условиями и дисклеймером" открывает модалку с политикой
-                      и НЕ дёргает чекбокс — это обеспечивается @click.stop.prevent на ссылке.
-                    -->
                     <label class="flex gap-3 p-3 bg-gray-50 rounded-lg mb-4 cursor-pointer hover:bg-gray-100 transition-colors"
                            @click.prevent="onConsentClick()">
                         <input type="checkbox" :checked="consent" readonly
@@ -235,11 +267,6 @@
                             </div>
                         </div>
 
-                        <!--
-                          Картинка вопроса — на всю ширину, без скруглений и боковых отступов.
-                          Раньше было: aspect-[16/9] ... mx-5 rounded-xl  → как на форме.
-                          Теперь:      aspect-[16/9] ... overflow-hidden  → как на welcome/result.
-                        -->
                         <div :key="`img-${currentQuestion.number}`" class="aspect-[16/9] bg-gray-100 overflow-hidden question-fade">
                             <img :src="`assets/images/${currentQuestion.number}.jpg`" :alt="`Вопрос ${currentQuestion.number}`"
                                  class="w-full h-full object-cover"
@@ -344,7 +371,7 @@
                                 <p class="text-[12px] text-emerald-700 mt-2" x-text="`Заявка №${result.data.lead_number}`"></p>
                             </div>
 
-                            <button @click="shareWithFriends()"
+                            <button @click="modal = 'share'"
                                     class="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white text-[15px] font-medium rounded-lg flex items-center justify-center gap-2 mb-3">
                                 ❤️ Поделиться с близкими
                             </button>
@@ -392,7 +419,7 @@
         <!--  МОДАЛКИ                                              -->
         <!-- ════════════════════════════════════════════════════ -->
 
-        <!-- 1. Дисклеймер при клике на согласие 152-ФЗ -->
+        <!-- 1. Дисклеймер -->
         <div x-show="modal === 'disclaimer'" x-transition.opacity.duration.150ms
              class="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
             <div x-show="modal === 'disclaimer'"
@@ -432,10 +459,6 @@
         </div>
 
         <!-- 1b. Политика конфиденциальности -->
-        <!--
-          Открывается по клику на ссылку "условиями и дисклеймером" в чекбоксе согласия.
-          Текст пока — заглушка-черновик. Когда напишете официальный текст — замените содержимое.
-        -->
         <div x-show="modal === 'privacy'" x-transition.opacity.duration.150ms
              class="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
              @click.self="modal = null">
@@ -446,12 +469,7 @@
                  class="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col">
                 <div class="overflow-y-auto p-5 pt-6">
                     <h3 class="text-lg font-medium text-gray-900 mb-3">🔒 Политика конфиденциальности</h3>
-
-                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">
-                        Мы серьёзно относимся к защите ваших персональных данных. Ниже — кратко о том,
-                        что мы собираем и зачем.
-                    </p>
-
+                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">Мы серьёзно относимся к защите ваших персональных данных. Ниже — кратко о том, что мы собираем и зачем.</p>
                     <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Какие данные собираем</h4>
                     <ul class="space-y-1 text-sm text-gray-700 ml-1 mb-3">
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>ФИО и телефон — чтобы консультант мог с вами связаться</span></li>
@@ -459,36 +477,87 @@
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>Ваши ответы на 36 вопросов теста</span></li>
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>Идентификатор в Telegram/VK (для распознавания при повторном визите)</span></li>
                     </ul>
-
                     <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Как используем</h4>
                     <ul class="space-y-1 text-sm text-gray-700 ml-1 mb-3">
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>Консультант перезвонит, чтобы обсудить результаты</span></li>
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>Подберём программу здоровья под вашу ситуацию</span></li>
                         <li class="flex gap-2"><span class="text-gray-400">•</span><span>Можем прислать копию отчёта на email</span></li>
                     </ul>
-
                     <h4 class="text-sm font-semibold text-gray-900 mt-4 mb-2">Кому передаём</h4>
-                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">
-                        Данные не передаются третьим лицам. Хранятся в защищённой базе и доступны
-                        только консультанту-владельцу.
-                    </p>
-
+                    <p class="text-sm text-gray-700 mb-3 leading-relaxed">Данные не передаются третьим лицам. Хранятся в защищённой базе и доступны только консультанту-владельцу.</p>
                     <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4 mb-2">
-                        <p class="text-[12px] text-blue-900 leading-relaxed">
-                            ℹ️ Обработка персональных данных осуществляется в соответствии с
-                            Федеральным законом от 27.07.2006 №152-ФЗ «О персональных данных».
-                        </p>
+                        <p class="text-[12px] text-blue-900 leading-relaxed">ℹ️ Обработка персональных данных осуществляется в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ «О персональных данных».</p>
                     </div>
-
-                    <p class="text-xs text-gray-500 mt-3 leading-relaxed">
-                        Если хотите удалить свои данные — напишите консультанту, и мы их удалим
-                        в течение 1 рабочего дня.
-                    </p>
+                    <p class="text-xs text-gray-500 mt-3 leading-relaxed">Если хотите удалить свои данные — напишите консультанту, и мы их удалим в течение 1 рабочего дня.</p>
                 </div>
                 <div class="border-t border-gray-100 p-4 bg-white rounded-b-2xl">
+                    <button @click="modal = null" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium rounded-lg">Понятно</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1c. ❤️ ПОДЕЛИТЬСЯ С БЛИЗКИМИ -->
+        <!--
+          Открывается с экрана результатов по кнопке «Поделиться с близкими».
+          Внутри:
+            - тёплое сообщение
+            - блок "Скопируйте и отправьте" (.copyable + кнопка «Скопировать»)
+            - кнопка «Отправить через Telegram» (нативный share)
+        -->
+        <div x-show="modal === 'share'" x-transition.opacity.duration.150ms
+             class="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
+             @click.self="modal = null">
+            <div x-show="modal === 'share'"
+                 x-transition:enter="transition transform duration-200"
+                 x-transition:enter-start="translate-y-8 opacity-0"
+                 x-transition:enter-end="translate-y-0 opacity-100"
+                 class="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] flex flex-col">
+
+                <div class="overflow-y-auto p-5 pt-6">
+
+                    <h3 class="text-lg font-medium text-gray-900 mb-2 flex items-center gap-2">
+                        ❤️ Забота о близких
+                    </h3>
+
+                    <p class="text-[14px] text-gray-700 mb-2 leading-relaxed">
+                        Мы ценим и любим тех, кто рядом с нами. И хотим, чтобы они всегда были здоровы.
+                    </p>
+                    <p class="text-[14px] text-gray-700 mb-4 leading-relaxed">
+                        Чтобы для ваших близких не стало сюрпризом неизвестное состояние здоровья ☝️ —
+                        отправьте им этот тест. Иногда одно сообщение — это больше, чем кажется.
+                    </p>
+
+                    <p class="text-[12px] text-gray-500 mb-2 font-medium uppercase tracking-wide">
+                        📋 Скопируйте и отправьте:
+                    </p>
+
+                    <!-- Блок «выделить-скопировать» — кликни, чтобы выделить весь текст -->
+                    <div class="copyable bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3 text-[13px] text-gray-800 leading-relaxed whitespace-pre-line"
+                         x-text="shareMessage"></div>
+
+                    <button @click="copyShareMessage()"
+                            class="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-[14px] font-medium rounded-lg flex items-center justify-center gap-2 mb-4">
+                        📋 Скопировать в буфер
+                    </button>
+
+                    <p class="text-[12px] text-gray-500 mb-2 font-medium uppercase tracking-wide">
+                        🚀 Или сразу отправьте:
+                    </p>
+
+                    <button @click="shareViaTelegram()"
+                            class="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white text-[15px] font-medium rounded-lg flex items-center justify-center gap-2">
+                        📤 Отправить через Telegram
+                    </button>
+
+                    <p class="text-[11px] text-gray-400 text-center mt-4 leading-relaxed">
+                        🌿 Тест займёт всего 2 минуты, а пользы — на долгие годы!
+                    </p>
+                </div>
+
+                <div class="border-t border-gray-100 p-3 bg-white rounded-b-2xl">
                     <button @click="modal = null"
-                            class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium rounded-lg">
-                        Понятно
+                            class="w-full py-2.5 text-gray-600 text-[14px] font-medium rounded-lg hover:bg-gray-50">
+                        Закрыть
                     </button>
                 </div>
             </div>
@@ -532,7 +601,7 @@
             </div>
         </div>
 
-        <!-- 4. Подтверждение "Пройти ещё раз" -->
+        <!-- 4. Перезапуск теста -->
         <div x-show="modal === 'restartTest'" x-transition.opacity.duration.150ms
              class="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
              @click.self="modal = null">
@@ -552,6 +621,9 @@
             </div>
         </div>
 
+        <!-- Тост-уведомление «Скопировано!» -->
+        <div x-show="toast" x-transition class="toast" x-text="toast"></div>
+
     </div>
 
 
@@ -561,6 +633,10 @@
     <script>
         const STORAGE_KEY = 'wellness_app_state_v1';
         const API_BASE = 'http://127.0.0.1:8000';
+
+        // Юзернейм нашего бота (для генерации реф-ссылки в режиме «поделиться»)
+        // ВАЖНО: должно совпадать с BOT_USERNAME на бэкенде (core/config.py)
+        const BOT_USERNAME = 'WellnessTest_bot';
 
         const CONSULTANT_CONTACT_URL = 'https://t.me/Diamondberg';
 
@@ -572,11 +648,25 @@
         ];
         const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+        // Тёплый текст для шаринга. Юзер увидит его в модалке + сможет переслать.
+        const SHARE_MESSAGE_TEMPLATE = (link) => (
+`❤️ Привет! Я недавно прошёл небольшой тест на состояние здоровья — всего две минуты. Решил поделиться с тобой, мне кажется тебе тоже может быть полезно. Не откладывай заботу на потом — это просто поможет понять, на что обратить внимание.
+
+🌿 Береги себя!
+
+${link}`
+        );
+
         function app() {
             return {
                 screen: 'welcome',
                 modal: null,
                 consent: false,
+                toast: null,
+
+                // ID платформенного юзера, который ПРИГЛАСИЛ текущего.
+                // Берётся из start_param TG WebApp или из ?invite= URL (для теста в браузере).
+                referrerPlatformId: null,
 
                 form: {
                     fullName: '', fullNameTouched: false,
@@ -621,6 +711,18 @@
                     return Math.round(((this.test.currentIndex + 1) / this.test.questions.length) * 100);
                 },
 
+                // ─── Шаринг: реф-ссылка и сообщение ──────────
+                get currentUserPlatformId() {
+                    // ID самого юзера на платформе — нужен для генерации ЕГО реф-ссылки
+                    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 999000111;
+                },
+                get referralLink() {
+                    return `https://t.me/${BOT_USERNAME}?start=invite_${this.currentUserPlatformId}`;
+                },
+                get shareMessage() {
+                    return SHARE_MESSAGE_TEMPLATE(this.referralLink);
+                },
+
                 systemColors(status) {
                     const map = {
                         good:     { emoji: '✅', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Всё в порядке' },
@@ -632,6 +734,7 @@
 
                 init() {
                     this.loadState();
+                    this.readReferrerFromUrl();
                     this.$watch('consent', () => this.saveState());
                     this.$watch('form', () => this.saveState(), { deep: true });
                     this.$watch('screen', () => this.saveState());
@@ -642,7 +745,39 @@
                         window.Telegram.WebApp.ready();
                         window.Telegram.WebApp.expand();
                     }
-                    console.log('✅ App loaded');
+                    console.log('✅ App loaded. referrerPlatformId =', this.referrerPlatformId);
+                },
+
+                // ─── Чтение реферера из URL/start_param (новое в Шаге 5.1) ──
+                readReferrerFromUrl() {
+                    let inviteCode = null;
+
+                    // 1) TG WebApp передаёт через start_param (приоритет)
+                    const tgParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+                    if (tgParam) {
+                        inviteCode = tgParam;
+                    }
+
+                    // 2) Браузер (для теста) — через query ?invite=invite_12345 или ?invite=12345
+                    if (!inviteCode) {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        inviteCode = urlParams.get('invite');
+                    }
+
+                    if (!inviteCode) return;
+
+                    // Парсим invite_<число>. Если пришло просто число — тоже принимаем.
+                    let id;
+                    if (inviteCode.startsWith('invite_')) {
+                        id = parseInt(inviteCode.replace('invite_', ''), 10);
+                    } else {
+                        id = parseInt(inviteCode, 10);
+                    }
+
+                    if (!isNaN(id) && id > 0) {
+                        this.referrerPlatformId = id;
+                        console.log('🎁 Реферер из URL:', id);
+                    }
                 },
 
                 saveState() {
@@ -656,6 +791,7 @@
                                 email: this.form.email,
                             },
                             test: { answers: this.test.answers, currentIndex: this.test.currentIndex },
+                            referrerPlatformId: this.referrerPlatformId,
                         }));
                     } catch (e) { console.warn('save failed:', e); }
                 },
@@ -675,6 +811,7 @@
                             this.test.answers = s.test.answers || {};
                             this.test.currentIndex = s.test.currentIndex || 0;
                         }
+                        if (s.referrerPlatformId) this.referrerPlatformId = s.referrerPlatformId;
                     } catch (e) { console.warn('load failed:', e); }
                 },
 
@@ -724,10 +861,12 @@
                         answers: answers,
                         platform: {
                             platform: 'telegram',
-                            user_id: window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 999000111,
+                            user_id: this.currentUserPlatformId,
                             username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username || null,
                             first_name: window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name || null,
                         },
+                        // ✨ Новое в Шаге 5.1: пробрасываем ID реферера
+                        referrer_platform_id: this.referrerPlatformId,
                     };
 
                     try {
@@ -810,30 +949,57 @@
                     window.open(CONSULTANT_CONTACT_URL, '_blank', 'noopener');
                 },
 
-                shareWithFriends() {
-                    const referralUrl = window.location.origin + '/';
-                    const shareText =
-                        "⏱ 2 МИНУТЫ НА ГЛАВНОЕ\n\n" +
-                        "Мы часто откладываем заботу о здоровье «на потом».\n" +
-                        "А потом — это не всегда гарантировано.\n\n" +
-                        "Этот тест — простой способ проверить себя:\n" +
-                        "• 36 вопросов\n• 2 минуты\n• Без диагнозов, без стресса\n\n" +
-                        "🌿 Всего две минуты, а пользы на долгие годы!";
+                // ─── Шаринг: копирование и отправка ──────────
+                showToast(text, ms = 2000) {
+                    this.toast = text;
+                    setTimeout(() => { this.toast = null; }, ms);
+                },
+
+                async copyShareMessage() {
+                    const text = this.shareMessage;
+
+                    // Попытка 1: Clipboard API (современные браузеры, TG WebApp)
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        try {
+                            await navigator.clipboard.writeText(text);
+                            this.showToast('✅ Скопировано в буфер!');
+                            return;
+                        } catch (e) {
+                            console.warn('Clipboard API failed:', e);
+                        }
+                    }
+
+                    // Попытка 2: старый трюк через textarea (fallback для древних браузеров)
+                    try {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        const ok = document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        if (ok) {
+                            this.showToast('✅ Скопировано!');
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn('execCommand copy failed:', e);
+                    }
+
+                    // Если совсем никак — просим выделить вручную
+                    this.showToast('⚠️ Выделите текст вручную и скопируйте');
+                },
+
+                shareViaTelegram() {
+                    const text = this.shareMessage;
+                    const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(this.referralLink)}&text=${encodeURIComponent(text)}`;
 
                     if (window.Telegram?.WebApp) {
-                        const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${encodeURIComponent(shareText)}`;
                         window.Telegram.WebApp.openTelegramLink(tgShareUrl);
                         return;
                     }
-
-                    const fullText = `${shareText}\n\n${referralUrl}`;
-                    if (navigator.clipboard) {
-                        navigator.clipboard.writeText(fullText).then(() => {
-                            alert('🔗 Ссылка и текст скопированы! Поделись с близкими.');
-                        });
-                    } else {
-                        prompt('Скопируйте ссылку:', referralUrl);
-                    }
+                    window.open(tgShareUrl, '_blank', 'noopener');
                 },
 
                 confirmRestartTest() { this.modal = 'restartTest'; },
@@ -849,6 +1015,8 @@
                     this.result.error = null;
                     this.modal = null;
                     this.screen = 'welcome';
+                    // referrerPlatformId сохраняем — если юзер хочет пройти повторно
+                    // как «новый человек», это всё равно тот же референс по ссылке
                     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
                     window.scrollTo(0, 0);
                 },
