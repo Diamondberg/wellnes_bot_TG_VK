@@ -40,4 +40,4 @@ output/
 test_output_report.*
 output/
 *.rar
-*.zip
+*.zip.env.bak
