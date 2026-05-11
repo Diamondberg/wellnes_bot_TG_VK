@@ -15,6 +15,8 @@
    Это позволит мэтчить рефералов с разных платформ.
 5. email — опциональное поле. Если юзер указал — шлём ему копию отчёта на почту.
    Не уникальное (один email теоретически может быть у разных людей).
+6. is_distributor — особая запись: владелец бота. К нему привязываются
+   "холодные" лиды (без реф-ссылки или по битой ссылке). Корень реф-сети.
 """
 
 from datetime import datetime
@@ -80,6 +82,10 @@ class Tenant(Base):
 class User(Base):
     """
     Лид. Один человек = одна запись (мэтчинг по телефону + tenant_id).
+
+    Особый случай — `is_distributor=True`. Это запись владельца бота.
+    Создаётся вручную SQL-скриптом при деплое. К ней привязываются
+    «холодные» лиды (зашли через поиск/рекламу, без реф-ссылки).
     """
     __tablename__ = "users"
     __table_args__ = (
@@ -121,6 +127,14 @@ class User(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # ─── Дистрибьютор (корень реф-сети) ────────────────────
+    # Это пометка для одной особой записи — владельца бота.
+    # У дистрибьютора lead_number=0, и он НЕ получает уведомления
+    # рефереру (потому что и так получает основные письма админу).
+    is_distributor: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+
     # ─── Согласие на обработку ПД (152-ФЗ) ─────────────────
     consent_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -147,6 +161,8 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
+        if self.is_distributor:
+            return f"<User #{self.lead_number} {self.full_name} (DISTRIBUTOR)>"
         return f"<User #{self.lead_number} {self.full_name} ({self.phone})>"
 
 
@@ -179,7 +195,11 @@ class Answer(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    # Связи
     user: Mapped["User"] = relationship(back_populates="answers")
+
+    def __repr__(self) -> str:
+        return f"<Answer q{self.question_number}={self.answer} sys={self.system}>"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -189,44 +209,37 @@ class Referral(Base):
     """
     Реферальная связь.
 
-    Хранится отдельно от users.referrer_id, потому что:
-    1. Связь могла появиться ДО регистрации (человек кликнул по ссылке,
-       но ещё не дал телефон) — тогда referred_user_id = NULL.
-    2. Удобно отслеживать момент перехода по ссылке (created_at)
-       отдельно от момента регистрации.
+    Создаётся в двух случаях:
+    1. Юзер прошёл тест по реф-ссылке — связь сохраняется уже с user.id
+    2. (Будущее) Юзер кликнул по реф-ссылке, но не зарегистрировался —
+       связь сохраняется только с platform+user_id
+
+    Поле completed=True означает что приглашённый прошёл тест до конца.
     """
     __tablename__ = "referrals"
-    __table_args__ = (
-        # Один и тот же человек на одной платформе может быть рефералом только раз
-        UniqueConstraint("tenant_id", "platform", "referred_platform_id",
-                         name="uq_referral_unique_referred"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
     tenant_id: Mapped[int] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    # Кто пригласил (всегда зарегистрированный пользователь)
+    # Кто пригласил
     referrer_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    # На какой платформе произошёл клик по ссылке
-    platform: Mapped[str] = mapped_column(String(16), nullable=False)  # telegram / vk / max
+    # На какой платформе произошёл клик
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    # ID приглашённого на этой платформе (например TG user_id).
-    # Заполняется ДО того, как мы узнаем телефон.
+    # ID приглашённого на платформе (может быть до того как он прошёл тест)
     referred_platform_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    # Когда приглашённый зарегистрируется и оставит телефон —
-    # сюда ляжет ссылка на User.id
+    # Внутренний ID приглашённого (NULL пока не зарегистрировался)
     referred_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
-    # Прошёл ли тест приглашённый (для статистики "/referrals")
+    # Прошёл ли приглашённый тест до конца
     completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -235,6 +248,6 @@ class Referral(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Referral by={self.referrer_user_id} "
-            f"platform={self.platform} completed={self.completed}>"
+            f"<Referral {self.referrer_user_id} → {self.referred_user_id or '?'} "
+            f"({self.platform}, completed={self.completed})>"
         )

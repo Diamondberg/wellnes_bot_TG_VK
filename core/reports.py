@@ -47,9 +47,21 @@ class UserSnapshot:
     platform_user_id: int       # tg/vk/max user_id
     platform_username: Optional[str] = None  # @username, если есть
 
-    # Информация о реферере (если применимо)
+    # ─── Информация о реферере (если применимо) ──────────────
+    # Все поля Optional — для обратной совместимости.
+    # Если реферер = дистрибьютор → referrer_name=None, в письме покажется
+    # пометка «🌐 Зашёл напрямую» (см. core/notifier.py).
     referrer_name: Optional[str] = None
     referrer_phone: Optional[str] = None
+
+    # Дополнительные поля реферера для письма админу (Шаг 5.2).
+    # Чтобы админ мог связаться с реферером по нужному каналу
+    # и предложить участие в реферальной программе.
+    referrer_email: Optional[str] = None
+    referrer_tg_username: Optional[str] = None   # без @, например "Diamondberg"
+    referrer_tg_user_id: Optional[int] = None    # для ссылки tg://user?id=...
+    referrer_vk_user_id: Optional[int] = None    # для ссылки https://vk.com/id...
+    referrer_max_user_id: Optional[int] = None   # для будущей ссылки в Max
 
 
 # ════════════════════════════════════════════════════════════
@@ -89,12 +101,27 @@ def generate_txt_report(
     if user.platform_username:
         lines.append(f"Username:   @{user.platform_username}")
 
+    # ─── Блок реферера (Шаг 5.2: расширенный или «холодный») ──
     if user.referrer_name:
         lines.append("")
         lines.append("─── Реферал от ───")
-        lines.append(f"ФИО:      {user.referrer_name}")
+        lines.append(f"ФИО:        {user.referrer_name}")
         if user.referrer_phone:
-            lines.append(f"Телефон:  {user.referrer_phone}")
+            lines.append(f"Телефон:    {user.referrer_phone}")
+        if user.referrer_email:
+            lines.append(f"Email:      {user.referrer_email}")
+        if user.referrer_tg_username:
+            lines.append(f"Telegram:   @{user.referrer_tg_username}")
+        elif user.referrer_tg_user_id:
+            lines.append(f"Telegram:   id={user.referrer_tg_user_id}")
+        if user.referrer_vk_user_id:
+            lines.append(f"VK:         https://vk.com/id{user.referrer_vk_user_id}")
+        if user.referrer_max_user_id:
+            lines.append(f"Max ID:     {user.referrer_max_user_id}")
+    else:
+        lines.append("")
+        lines.append("─── Реферал ───")
+        lines.append("🌐 Зашёл напрямую (без реф-ссылки)")
 
     # ─── Сводка по системам ────────────────────────────────
     lines.append("")
@@ -192,6 +219,10 @@ def generate_excel_report(
     fill_critical = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
     wrap = Alignment(wrap_text=True, vertical="top")
 
+    # Подсветка блока реферера (мягкий жёлтый) и блока «холодного» (мягкий синий)
+    fill_referrer = PatternFill(start_color="FFF8E1", end_color="FFF8E1", fill_type="solid")
+    fill_cold = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+
     status_to_fill = {
         "good": fill_good,
         "warning": fill_warning,
@@ -224,14 +255,48 @@ def generate_excel_report(
         ("User ID", str(user.platform_user_id)),
         ("Username", f"@{user.platform_username}" if user.platform_username else "—"),
     ]
-    if user.referrer_name:
-        contact_data.append(("Реферер ФИО", user.referrer_name))
-        contact_data.append(("Реферер тел.", user.referrer_phone or "—"))
 
     for label, value in contact_data:
         row += 1
         ws.cell(row=row, column=1, value=label).font = Font(bold=True)
         ws.cell(row=row, column=2, value=value)
+
+    # ─── Блок «Реферал» (расширенный или пометка «Зашёл напрямую») ──
+    row += 1  # пустая строка-разделитель
+    if user.referrer_name:
+        # Реальный реферер: показываем все доступные контакты
+        referrer_data = [
+            ("Реферер ФИО", user.referrer_name),
+            ("Реферер тел.", user.referrer_phone or "—"),
+        ]
+        if user.referrer_email:
+            referrer_data.append(("Реферер email", user.referrer_email))
+        if user.referrer_tg_username:
+            referrer_data.append(("Реферер TG", f"@{user.referrer_tg_username}"))
+        elif user.referrer_tg_user_id:
+            referrer_data.append(("Реферер TG ID", str(user.referrer_tg_user_id)))
+        if user.referrer_vk_user_id:
+            referrer_data.append(
+                ("Реферер VK", f"https://vk.com/id{user.referrer_vk_user_id}")
+            )
+        if user.referrer_max_user_id:
+            referrer_data.append(("Реферер Max ID", str(user.referrer_max_user_id)))
+
+        for label, value in referrer_data:
+            row += 1
+            cell_l = ws.cell(row=row, column=1, value=label)
+            cell_l.font = Font(bold=True)
+            cell_l.fill = fill_referrer
+            cell_v = ws.cell(row=row, column=2, value=value)
+            cell_v.fill = fill_referrer
+    else:
+        # «Холодный» лид — реферер = дистрибьютор или None
+        row += 1
+        cell_l = ws.cell(row=row, column=1, value="Реферал")
+        cell_l.font = Font(bold=True)
+        cell_l.fill = fill_cold
+        cell_v = ws.cell(row=row, column=2, value="🌐 Зашёл напрямую (без реф-ссылки)")
+        cell_v.fill = fill_cold
 
     # ─── Блок «Результаты по системам» ─────────────────────
     row += 2
@@ -257,7 +322,7 @@ def generate_excel_report(
 
     # Ширина колонок на первом листе
     ws.column_dimensions["A"].width = 30
-    ws.column_dimensions["B"].width = 35
+    ws.column_dimensions["B"].width = 40
     ws.column_dimensions["C"].width = 12
     ws.column_dimensions["D"].width = 25
 

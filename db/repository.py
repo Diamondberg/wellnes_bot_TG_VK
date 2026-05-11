@@ -80,10 +80,41 @@ async def get_user_by_platform_id(
     return result.scalar_one_or_none()
 
 
-async def get_next_lead_number(session: AsyncSession, tenant_id: int) -> int:
-    """Следующий номер заявки в рамках tenant'а."""
+async def get_distributor(
+    session: AsyncSession,
+    tenant_id: int,
+) -> Optional[User]:
+    """
+    Найти дистрибьютора в этом tenant'е.
+
+    Дистрибьютор — единственная запись в users с is_distributor=True.
+    К нему привязываются все "холодные" лиды (без реф-ссылки или
+    по битой реф-ссылке).
+
+    Если в БД нет записи с is_distributor=True — возвращает None.
+    Тогда API упадёт обратно на старое поведение (referrer_id=NULL).
+    """
     result = await session.execute(
-        select(func.max(User.lead_number)).where(User.tenant_id == tenant_id)
+        select(User).where(
+            User.tenant_id == tenant_id,
+            User.is_distributor == True,  # noqa: E712 (SQLAlchemy сравнение)
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_next_lead_number(session: AsyncSession, tenant_id: int) -> int:
+    """
+    Следующий номер заявки в рамках tenant'а.
+
+    ВАЖНО: считаем только реальных лидов (is_distributor=False).
+    У дистрибьютора lead_number=0 — он не должен влиять на нумерацию.
+    """
+    result = await session.execute(
+        select(func.max(User.lead_number)).where(
+            User.tenant_id == tenant_id,
+            User.is_distributor == False,  # noqa: E712
+        )
     )
     max_num = result.scalar()
     return (max_num or 0) + 1
@@ -114,7 +145,11 @@ async def upsert_user(
       - При создании — пишем то, что передали (может быть None)
       - При обновлении — пишем только если переданное значение не None.
         То есть если юзер раз указал email, а во второй раз не указал —
-        старый email НЕ затирается. Логика "один раз дал — навсегда осталось".
+        старый email НЕ затирается.
+
+    Поведение для referrer_user_id:
+      - Реферер НЕ перезаписывается при повторном прохождении.
+        Один раз привязан — навсегда.
     """
     user = await get_user_by_phone(session, tenant_id, phone)
 
@@ -216,13 +251,27 @@ async def link_referral(
     platform: str,
     referred_platform_id: int,
     referred_user_id: Optional[int] = None,
-) -> Referral:
+) -> Optional[Referral]:
     """
     Создать или обновить реферальную связь.
 
     Если запись уже есть (один человек кликнул по ссылке несколько раз) —
     просто обновляем referred_user_id (на случай если он раньше не был известен).
+
+    ВАЖНО: если referrer_user_id указывает на дистрибьютора —
+    реферальную связь НЕ создаём. Зачем хранить «холодный → дистрибьютор»
+    в таблице referrals — это и так понятно по полю User.referrer_id.
+    Чтобы таблица referrals содержала только РЕАЛЬНЫЕ цепочки между юзерами.
     """
+    # Проверка: не пытаемся ли мы связать с дистрибьютором?
+    referrer_result = await session.execute(
+        select(User.is_distributor).where(User.id == referrer_user_id)
+    )
+    is_distributor = referrer_result.scalar()
+    if is_distributor:
+        # Не создаём запись — это «холодный» лид, не реальная цепочка
+        return None
+
     # Ищем существующую связь
     result = await session.execute(
         select(Referral).where(

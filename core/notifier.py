@@ -7,6 +7,11 @@
   - send_lead_email                  — АДМИНУ:    полный отчёт + Excel + TXT + сегментация
   - send_user_report                 — ЮЗЕРУ:     дружелюбное HTML без вложений
   - send_referrer_notification_email — РЕФЕРЕРУ:  тёплое уведомление без вложений
+
+Шаг 5.2:
+  - В письме админу — расширенный блок реферера (email, TG/VK/Max ссылки).
+  - Если у юзера нет реферера (referrer_name=None) — пометка «🌐 Зашёл напрямую».
+    Это бывает когда лид «холодный» (нет реф-ссылки или реферер = дистрибьютор).
 """
 
 import logging
@@ -21,6 +26,98 @@ from core.reports import DISCLAIMER, UserSnapshot
 from core.test_engine import TestResult
 
 logger = logging.getLogger(__name__)
+
+
+# ════════════════════════════════════════════════════════════
+#  Блок «Реферер» / «Зашёл напрямую» для письма АДМИНУ
+# ════════════════════════════════════════════════════════════
+def _build_referrer_block(user: UserSnapshot) -> str:
+    """
+    Сформировать HTML-блок с информацией о рефере.
+
+    Логика:
+      - Если referrer_name есть → блок «🎁 Реферал от» с расширенной инфой
+        (ФИО, телефон, email, TG/VK/Max ссылки — что есть, то и показываем).
+      - Если referrer_name пустой → блок «🌐 Зашёл напрямую» (холодный лид).
+    """
+    if not user.referrer_name:
+        # «Холодный» лид — реферер = дистрибьютор или None
+        return """
+        <div style="background:#E3F2FD;border-left:4px solid #1976D2;padding:10px 14px;margin:12px 0;border-radius:4px">
+            <p style="margin:0;font-weight:600;color:#0D47A1">🌐 Зашёл напрямую</p>
+            <p style="margin:4px 0 0 0;font-size:13px;color:#1565C0">
+                Без реферальной ссылки (или по битой ссылке)
+            </p>
+        </div>
+        """
+
+    # ─── Реальный реферер: собираем расширенный блок ─────
+    contact_lines = []
+
+    if user.referrer_phone:
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'📱 Тел: <a href="tel:{escape(user.referrer_phone)}" '
+            f'style="color:#1976D2;text-decoration:none">{escape(user.referrer_phone)}</a>'
+            f'</p>'
+        )
+
+    if user.referrer_email:
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'📧 Email: <a href="mailto:{escape(user.referrer_email)}" '
+            f'style="color:#1976D2;text-decoration:none">{escape(user.referrer_email)}</a>'
+            f'</p>'
+        )
+
+    if user.referrer_tg_username:
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'✈️ Telegram: <a href="https://t.me/{escape(user.referrer_tg_username)}" '
+            f'style="color:#1976D2;text-decoration:none">@{escape(user.referrer_tg_username)}</a>'
+            f'</p>'
+        )
+    elif user.referrer_tg_user_id:
+        # Если username нет (приватный профиль), даём ссылку через user_id
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'✈️ Telegram: <a href="tg://user?id={user.referrer_tg_user_id}" '
+            f'style="color:#1976D2;text-decoration:none">id={user.referrer_tg_user_id}</a>'
+            f'</p>'
+        )
+
+    if user.referrer_vk_user_id:
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'🅥 VK: <a href="https://vk.com/id{user.referrer_vk_user_id}" '
+            f'style="color:#1976D2;text-decoration:none">'
+            f'vk.com/id{user.referrer_vk_user_id}</a>'
+            f'</p>'
+        )
+
+    if user.referrer_max_user_id:
+        # Max пока без публичной ссылки — показываем ID для ручного поиска
+        contact_lines.append(
+            f'<p style="margin:2px 0;font-size:14px;color:#5D4037">'
+            f'Ⓜ️ Max ID: <code>{user.referrer_max_user_id}</code>'
+            f'</p>'
+        )
+
+    contacts_html = "".join(contact_lines) if contact_lines else (
+        '<p style="margin:2px 0;font-size:13px;color:#999">Контакты не указаны</p>'
+    )
+
+    return f"""
+    <div style="background:#FFF8E1;border-left:4px solid #FFA000;padding:12px 14px;margin:12px 0;border-radius:4px">
+        <p style="margin:0 0 6px 0;font-size:15px;color:#5D4037">
+            <b>🎁 Реферал от:</b> {escape(user.referrer_name)}
+        </p>
+        {contacts_html}
+        <p style="margin:8px 0 0 0;font-size:12px;color:#8D6E63;font-style:italic">
+            💡 Можно связаться и предложить участие в реферальной программе
+        </p>
+    </div>
+    """
 
 
 # ════════════════════════════════════════════════════════════
@@ -46,14 +143,7 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
     else:
         segment = ("🟢 ХОЛОДНЫЙ ЛИД", "#388E3C", "всё неплохо")
 
-    referrer_block = ""
-    if user.referrer_name:
-        referrer_block = f"""
-        <div style="background:#FFF8E1;border-left:4px solid #FFA000;padding:10px 14px;margin:12px 0;border-radius:4px">
-            <p style="margin:0 0 4px 0"><b>🎁 Реферал от:</b> {escape(user.referrer_name)}</p>
-            {f'<p style="margin:0;font-size:14px;color:#666">Тел: {escape(user.referrer_phone)}</p>' if user.referrer_phone else ""}
-        </div>
-        """
+    referrer_block = _build_referrer_block(user)
 
     system_blocks = []
     for sr in result.systems:
@@ -377,7 +467,7 @@ async def send_user_report(
 
 
 # ════════════════════════════════════════════════════════════
-#  HTML для письма РЕФЕРЕРУ (новое в Шаге 5.1)
+#  HTML для письма РЕФЕРЕРУ
 # ════════════════════════════════════════════════════════════
 def _build_referrer_html_body(
     referrer_name: str,
@@ -444,7 +534,7 @@ def _build_referrer_html_body(
 
 
 # ════════════════════════════════════════════════════════════
-#  Отправка письма РЕФЕРЕРУ (новое в Шаге 5.1)
+#  Отправка письма РЕФЕРЕРУ
 # ════════════════════════════════════════════════════════════
 async def send_referrer_notification_email(
     referrer_email: str,
