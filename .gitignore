@@ -41,3 +41,8 @@ test_output_report.*
 output/
 *.rar
 *.zip.env.bak
+
+# Бэкапы .env — никогда не коммитим (содержат секреты)
+.env.bak
+.env.save
+.env.*
