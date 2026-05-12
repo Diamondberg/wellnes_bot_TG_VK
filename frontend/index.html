@@ -716,6 +716,11 @@ ${link}`
                     // ID самого юзера на платформе — нужен для генерации ЕГО реф-ссылки
                     return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 999000111;
                 },
+                // Строгий ID владельца стораджа. БЕЗ заглушки — в браузере вне TG возвращает null.
+                // Используется только для проверки "тот же это юзер или другой".
+                get ownerId() {
+                    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || null;
+                },
                 get referralLink() {
                     return `https://t.me/${BOT_USERNAME}?start=invite_${this.currentUserPlatformId}`;
                 },
@@ -783,6 +788,7 @@ ${link}`
                 saveState() {
                     try {
                         localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                            ownerId: this.ownerId,
                             consent: this.consent,
                             form: {
                                 fullName: this.form.fullName,
@@ -800,6 +806,17 @@ ${link}`
                         const raw = localStorage.getItem(STORAGE_KEY);
                         if (!raw) return;
                         const s = JSON.parse(raw);
+
+                        // Ownership check: если в сторадже стейт другого TG-юзера — чистим.
+                        // В браузере вне TG (ownerId === null) — доверяем сторадж как есть.
+                        // Старый стейт без поля ownerId не трогаем (плавная миграция).
+                        const currentOwner = this.ownerId;
+                        if (currentOwner !== null && s.ownerId && s.ownerId !== currentOwner) {
+                            console.log('🧹 Сменился TG-юзер, чистим стейт:', s.ownerId, '→', currentOwner);
+                            localStorage.removeItem(STORAGE_KEY);
+                            return;
+                        }
+
                         if (s.consent !== undefined) this.consent = s.consent;
                         if (s.form) {
                             this.form.fullName = s.form.fullName || '';
