@@ -9,6 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 
     <style>
         body {
@@ -738,6 +739,7 @@ ${link}`
                 },
 
                 init() {
+                    this.detectPlatform();   // ← определяем платформу ДО loadState (ownerId зависит)
                     this.loadState();
                     this.readReferrerFromUrl();
                     this.$watch('consent', () => this.saveState());
@@ -746,11 +748,54 @@ ${link}`
                     this.$watch('test.answers', () => this.saveState(), { deep: true });
                     this.$watch('test.currentIndex', () => this.saveState());
 
-                    if (window.Telegram?.WebApp) {
+                    if (this.platform === 'telegram' && window.Telegram?.WebApp) {
                         window.Telegram.WebApp.ready();
                         window.Telegram.WebApp.expand();
                     }
-                    console.log('✅ App loaded. referrerPlatformId =', this.referrerPlatformId);
+                    if (this.platform === 'vk' && window.vkBridge) {
+                        window.vkBridge.send('VKWebAppInit').catch((e) =>
+                            console.warn('VKWebAppInit failed:', e)
+                        );
+                        this.verifyVKLaunchParams();
+                    }
+                    console.log('✅ App loaded. platform =', this.platform,
+                                'referrerPlatformId =', this.referrerPlatformId);
+                },
+
+                detectPlatform() {
+                    // VK: при открытии Mini App в URL всегда есть vk_app_id (и куча vk_* + sign).
+                    const qs = new URLSearchParams(window.location.search);
+                    if (qs.has('vk_app_id') && qs.has('sign')) {
+                        this.platform = 'vk';
+                        this.vkLaunchParams = window.location.search.replace(/^\?/, '');
+                        return;
+                    }
+                    // TG: WebApp есть и initData непустой (Desktop в браузере initData пустой!)
+                    if (window.Telegram?.WebApp?.initData) {
+                        this.platform = 'telegram';
+                        return;
+                    }
+                    this.platform = 'browser';
+                },
+
+                async verifyVKLaunchParams() {
+                    if (!this.vkLaunchParams) return;
+                    try {
+                        const r = await fetch(`${API_BASE}/api/vk/verify`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ launch_params: this.vkLaunchParams }),
+                        });
+                        if (!r.ok) {
+                            console.error('VK verify failed:', r.status);
+                            return;
+                        }
+                        const data = await r.json();
+                        this.vkUserId = data.vk_user_id;
+                        console.log('✅ VK verified, user =', this.vkUserId);
+                    } catch (e) {
+                        console.error('VK verify error:', e);
+                    }
                 },
 
                 // ─── Чтение реферера из URL/start_param (новое в Шаге 5.1) ──
@@ -763,7 +808,15 @@ ${link}`
                         inviteCode = tgParam;
                     }
 
-                    // 2) Браузер (для теста) — через query ?invite=invite_12345 или ?invite=12345
+                    // 2) VK Mini App: реферал передаётся через hash #invite_12345
+                    if (!inviteCode && window.location.hash) {
+                        const h = window.location.hash.replace(/^#/, '');
+                        if (h.startsWith('invite_') || /^\d+$/.test(h)) {
+                            inviteCode = h;
+                        }
+                    }
+
+                    // 3) Браузер (для теста) — через query ?invite=invite_12345 или ?invite=12345
                     if (!inviteCode) {
                         const urlParams = new URLSearchParams(window.location.search);
                         inviteCode = urlParams.get('invite');
@@ -877,10 +930,14 @@ ${link}`
                         consent: this.consent,
                         answers: answers,
                         platform: {
-                            platform: 'telegram',
+                            platform: this.platform === 'vk' ? 'vk' : 'telegram',
                             user_id: this.currentUserPlatformId,
-                            username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username || null,
-                            first_name: window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name || null,
+                            username: this.platform === 'telegram'
+                                ? (window.Telegram?.WebApp?.initDataUnsafe?.user?.username || null)
+                                : null,
+                            first_name: this.platform === 'telegram'
+                                ? (window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name || null)
+                                : null,
                         },
                         // ✨ Новое в Шаге 5.1: пробрасываем ID реферера
                         referrer_platform_id: this.referrerPlatformId,
