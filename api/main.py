@@ -67,6 +67,7 @@ app.add_middleware(
 # ─── Подключение роутеров ───────────────────────────────────
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(questions.router, prefix="/api", tags=["questions"])
+app.include_router(test.router, prefix="/api", tags=["test"])
 app.include_router(vk_auth.router, prefix="/api", tags=["vk"])
 
 
