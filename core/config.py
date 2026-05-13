@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     )
 
     # ─── Telegram ───────────────────────────────────────────
+    # ─── VK Mini App ────────────────────────────────────────
+    vk_app_id: int = Field(..., description="ID VK Mini App (публичный)")
+    vk_group_id: int = Field(..., description="ID группы ВК (публичный)")
+    vk_secure_key: str = Field(..., description="Secure key приложения VK (секрет)")
+    vk_service_token: str = Field(..., description="Service token приложения VK (секрет)")
+    vk_community_token: str = Field(..., description="Community access token группы (секрет, права messages+manage)")
+    vk_mini_app_url: str = Field(
+        default="https://vk.com/app54517827",
+        description="Публичная ссылка на VK Mini App (для реферальных ссылок)",
+    )
+    
     bot_token: str = Field(..., description="Токен Telegram-бота")
     bot_username: str = Field(
         default="WellnessTest_bot",
@@ -104,6 +115,13 @@ class Settings(BaseSettings):
     def email_smtp_configured(self) -> bool:
         """SMTP настроен (для писем юзеру/рефереру — без email_to)."""
         return all([self.email_user, self.email_password])
+    
+    def vk_referral_link(self, platform_user_id: int) -> str:
+        """
+        Реферальная ссылка для VK Mini App.
+        Пример: https://vk.com/app54517827#invite_12345
+        """
+        return f"{self.vk_mini_app_url}#invite_{platform_user_id}"
 
     def referral_link(self, platform_user_id: int) -> str:
         """
@@ -111,6 +129,8 @@ class Settings(BaseSettings):
         Пример: https://t.me/WellnessTest_bot?start=invite_12345
         """
         return f"https://t.me/{self.bot_username}?start=invite_{platform_user_id}"
+    
+    
 
 
 settings = Settings()
