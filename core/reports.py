@@ -44,8 +44,17 @@ class UserSnapshot:
     full_name: str
     phone: str
     platform: str               # "telegram" / "vk" / "max"
-    platform_user_id: int       # tg/vk/max user_id
+    platform_user_id: int       # tg/vk/max user_id (текущая платформа)
     platform_username: Optional[str] = None  # @username, если есть
+
+    # ─── ID самого лида во всех платформах (для кликабельных ссылок) ──
+    # Заполняются из БД-записи юзера. У одного человека может быть
+    # заполнено сразу несколько (если поженили вручную или прошёл тест
+    # на нескольких платформах с одинаковым telegram_user_id).
+    lead_tg_user_id: Optional[int] = None
+    lead_tg_username: Optional[str] = None
+    lead_vk_user_id: Optional[int] = None
+    lead_max_user_id: Optional[int] = None
 
     # ─── Информация о реферере (если применимо) ──────────────
     # Все поля Optional — для обратной совместимости.

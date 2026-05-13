@@ -545,10 +545,23 @@
                         🚀 Или сразу отправьте:
                     </p>
 
-                    <button @click="shareViaTelegram()"
-                            class="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white text-[15px] font-medium rounded-lg flex items-center justify-center gap-2">
-                        📤 Отправить через Telegram
-                    </button>
+                    <div class="grid grid-cols-3 gap-3 mb-4">
+                        <button @click="shareTo('tg')"
+                                class="flex flex-col items-center gap-1 py-3 bg-[#229ED9] hover:bg-[#1d8ec3] text-white rounded-lg font-medium text-[13px]">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+                            <span>Telegram</span>
+                        </button>
+                        <button @click="shareTo('vk')"
+                                class="flex flex-col items-center gap-1 py-3 bg-[#0077FF] hover:bg-[#0066dd] text-white rounded-lg font-medium text-[13px]">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12.785 16.241s.288-.032.435-.193c.135-.148.131-.425.131-.425s-.019-1.302.583-1.494c.594-.19 1.357 1.262 2.165 1.821.611.422 1.075.33 1.075.33l2.16-.031s1.131-.07.595-.964c-.044-.073-.312-.66-1.602-1.86-1.352-1.257-1.17-1.054.456-3.232 1.0-1.326 1.4-2.137 1.275-2.484-.119-.331-.851-.244-.851-.244l-2.434.015s-.181-.025-.314.055c-.131.078-.215.262-.215.262s-.388.103-.916.946c-.745 1.183-1.114.92-1.114.92-.295 0-.219-.81-.219-1.388 0-1.799.272-2.55-.531-2.743-.266-.064-.462-.106-1.143-.113-.875-.009-1.616.003-2.035.208-.279.137-.494.443-.363.46.162.022.529.099.724.364.252.342.243 1.111.243 1.111s.145 2.117-.337 2.382c-.331.181-.785-.189-1.45-1.305-.341-.572-.598-1.205-.598-1.205s-.05-.122-.179-.187c-.156-.079-.375-.104-.375-.104l-2.314.015s-.347.01-.474.161c-.114.135-.009.413-.009.413s1.812 4.241 3.864 6.378c1.882 1.96 4.02 1.831 4.02 1.831h.967z"/></svg>
+                            <span>ВКонтакте</span>
+                        </button>
+                        <button @click="shareTo('max')"
+                                class="flex flex-col items-center gap-1 py-3 bg-[#0078FF] hover:bg-[#0066dd] text-white rounded-lg font-medium text-[13px]">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 12l10 10 10-10L12 2zm0 4.5L17.5 12 12 17.5 6.5 12 12 6.5z"/></svg>
+                            <span>Max</span>
+                        </button>
+                    </div>
 
                     <p class="text-[11px] text-gray-400 text-center mt-4 leading-relaxed">
                         🌿 Тест займёт всего 2 минуты, а пользы — на долгие годы!
@@ -1033,6 +1046,17 @@ ${link}`
                 confirmExitTestYes() { this.modal = null; this.screen = 'form'; },
 
                 contactConsultant() {
+                    // VK: открыть личку группы через VK Bridge
+                    if (this.platform === 'vk') {
+                        const vkChatUrl = 'https://vk.me/zdorovyakov';
+                        if (window.vkBridge) {
+                            // VKWebAppOpenApp не подходит для групп; используем стандартное открытие ссылки
+                            window.open(vkChatUrl, '_blank', 'noopener');
+                            return;
+                        }
+                        window.open(vkChatUrl, '_blank', 'noopener');
+                        return;
+                    }
                     if (window.Telegram?.WebApp && CONSULTANT_CONTACT_URL.includes('t.me/')) {
                         window.Telegram.WebApp.openTelegramLink(CONSULTANT_CONTACT_URL);
                         return;
@@ -1086,23 +1110,45 @@ ${link}`
                     this.showToast('⚠️ Выделите текст вручную и скопируйте');
                 },
 
-                shareViaTelegram() {
-                    const text = this.shareMessage;
+                referralLinkFor(target) {
+                    // target: 'tg' | 'vk' | 'max'
+                    // Реф-код = ID текущего юзера в любой его платформе
+                    const id = this.currentUserPlatformId;
+                    if (target === 'vk')  return `https://vk.com/app54517827#invite_${id}`;
+                    if (target === 'max') return `https://t.me/${BOT_USERNAME}?start=invite_${id}`;
+                    return `https://t.me/${BOT_USERNAME}?start=invite_${id}`;
+                },
 
-                    // VK: используем VK Bridge для шаринга на стене / другу
-                    if (this.platform === 'vk' && window.vkBridge) {
-                        window.vkBridge.send('VKWebAppShare', { link: this.referralLink })
-                            .catch((e) => console.warn('VKWebAppShare failed:', e));
+                shareTo(target) {
+                    const link = this.referralLinkFor(target);
+                    const text = SHARE_MESSAGE_TEMPLATE(link);
+
+                    if (target === 'vk') {
+                        if (window.vkBridge) {
+                            window.vkBridge.send('VKWebAppShare', { link })
+                                .catch((e) => console.warn('VKWebAppShare failed:', e));
+                        } else {
+                            window.open(`https://vk.com/share.php?url=${encodeURIComponent(link)}`, '_blank', 'noopener');
+                        }
                         return;
                     }
 
-                    const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(this.referralLink)}&text=${encodeURIComponent(text)}`;
-
-                    if (window.Telegram?.WebApp) {
-                        window.Telegram.WebApp.openTelegramLink(tgShareUrl);
+                    if (target === 'tg') {
+                        const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+                        if (this.platform === 'telegram' && window.Telegram?.WebApp) {
+                            window.Telegram.WebApp.openTelegramLink(tgShareUrl);
+                        } else {
+                            window.open(tgShareUrl, '_blank', 'noopener');
+                        }
                         return;
                     }
-                    window.open(tgShareUrl, '_blank', 'noopener');
+
+                    if (target === 'max') {
+                        // Заглушка: Max Mini App пока не интегрирован. Копируем в буфер.
+                        this.copyShareMessage();
+                        this.showToast('💬 Max пока на подходе — текст скопирован, отправьте вручную');
+                        return;
+                    }
                 },
 
                 confirmRestartTest() { this.modal = 'restartTest'; },

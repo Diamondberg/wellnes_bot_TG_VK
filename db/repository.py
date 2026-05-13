@@ -120,6 +120,32 @@ async def get_next_lead_number(session: AsyncSession, tenant_id: int) -> int:
     return (max_num or 0) + 1
 
 
+async def find_referrer_by_any_platform_id(
+    session: AsyncSession,
+    tenant_id: int,
+    platform_user_id: int,
+) -> Optional[User]:
+    """
+    Универсальный поиск юзера по ID в ЛЮБОЙ платформе (tg/vk/max).
+
+    Используется для реферера: реф-ссылка может прийти от юзера на одной
+    платформе, а получатель открыть её на другой. Если получатель в VK,
+    а отправитель сидит только в TG — ищем его tg_user_id в БД.
+    """
+    from sqlalchemy import or_
+    result = await session.execute(
+        select(User).where(
+            User.tenant_id == tenant_id,
+            or_(
+                User.tg_user_id == platform_user_id,
+                User.vk_user_id == platform_user_id,
+                User.max_user_id == platform_user_id,
+            ),
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def upsert_user(
     session: AsyncSession,
     tenant_id: int,
@@ -135,14 +161,18 @@ async def upsert_user(
     """
     Создать или обновить пользователя.
 
+    ВАЖНО: якорь — это (tenant_id, platform, platform_user_id).
+    НЕ телефон. Телефон/email — обычные поля.
+
     Логика:
-      1. Ищем по телефону в этом tenant'е
-      2. Если есть — обновляем (новые данные перетирают старые)
-      3. Если нет — создаём с новым lead_number
-      4. ID платформы сохраняем (один человек может прийти и через TG и через VK)
+      1. Ищем по (platform, platform_user_id) в этом tenant'е.
+      2. Если есть — обновляем (новые данные перетирают старые).
+      3. Если нет — создаём новую запись с новым lead_number.
+      4. Один человек, который проходит тест в TG и в VK, получит ДВЕ записи.
+         Их можно «поженить» отдельно (вручную или будущей фичей).
 
     Поведение для email:
-      - При создании — пишем то, что передали (может быть None)
+      - При создании — пишем то, что передали (может быть None).
       - При обновлении — пишем только если переданное значение не None.
         То есть если юзер раз указал email, а во второй раз не указал —
         старый email НЕ затирается.
@@ -151,7 +181,9 @@ async def upsert_user(
       - Реферер НЕ перезаписывается при повторном прохождении.
         Один раз привязан — навсегда.
     """
-    user = await get_user_by_phone(session, tenant_id, phone)
+    user = await get_user_by_platform_id(
+        session, tenant_id, platform, platform_user_id
+    )
 
     # Поля для платформы
     platform_fields = {
@@ -177,29 +209,24 @@ async def upsert_user(
             consent_at=datetime.now(timezone.utc),
             referrer_id=referrer_user_id,
         )
-        # Заполняем поля платформы
         setattr(user, pid_field, platform_user_id)
         if uname_field and platform_username:
             setattr(user, uname_field, platform_username)
         if fname_field and platform_first_name:
             setattr(user, fname_field, platform_first_name)
         session.add(user)
-        await session.flush()  # чтобы получить user.id
+        await session.flush()
     else:
         # ─── Обновляем существующего ───────────────────────
         user.full_name = full_name
-        # Email обновляем только если передано непустое значение —
-        # не затираем старый при повторном прохождении без email
+        user.phone = phone
         if email:
             user.email = email
-        # Если ID платформы ещё не был известен — записываем
-        if getattr(user, pid_field) is None:
-            setattr(user, pid_field, platform_user_id)
         if uname_field and platform_username:
             setattr(user, uname_field, platform_username)
         if fname_field and platform_first_name:
             setattr(user, fname_field, platform_first_name)
-        # Реферера НЕ перезаписываем — он определяется при первой регистрации
+        # Реферера НЕ перезаписываем
         await session.flush()
 
     return user

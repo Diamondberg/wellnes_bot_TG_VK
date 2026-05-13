@@ -123,6 +123,50 @@ def _build_referrer_block(user: UserSnapshot) -> str:
 # ════════════════════════════════════════════════════════════
 #  HTML для письма АДМИНУ
 # ════════════════════════════════════════════════════════════
+def _build_lead_links_block(user: UserSnapshot) -> str:
+    """
+    Кликабельный блок контактов лида: TG/VK/Max ссылки + ID.
+    Если у юзера заполнены и TG, и VK — покажем обе ссылки.
+    """
+    lines = []
+
+    # Telegram
+    if user.lead_tg_username:
+        lines.append(
+            f'<p style="margin:4px 0"><b>✈️ Telegram:</b> '
+            f'<a href="https://t.me/{escape(user.lead_tg_username)}" '
+            f'style="color:#1976D2;text-decoration:none">@{escape(user.lead_tg_username)}</a></p>'
+        )
+    elif user.lead_tg_user_id:
+        lines.append(
+            f'<p style="margin:4px 0"><b>✈️ Telegram:</b> '
+            f'<a href="tg://user?id={user.lead_tg_user_id}" '
+            f'style="color:#1976D2;text-decoration:none">id={user.lead_tg_user_id}</a></p>'
+        )
+
+    # VK
+    if user.lead_vk_user_id:
+        lines.append(
+            f'<p style="margin:4px 0"><b>🅥 VK:</b> '
+            f'<a href="https://vk.com/id{user.lead_vk_user_id}" '
+            f'style="color:#1976D2;text-decoration:none">vk.com/id{user.lead_vk_user_id}</a></p>'
+        )
+
+    # Max
+    if user.lead_max_user_id:
+        lines.append(
+            f'<p style="margin:4px 0"><b>Ⓜ️ Max ID:</b> <code>{user.lead_max_user_id}</code></p>'
+        )
+
+    if not lines:
+        # Fallback на старое поведение, если ни одного ID нет
+        lines.append(
+            f'<p style="margin:4px 0"><b>🆔 User ID:</b> <code>{user.platform_user_id}</code></p>'
+        )
+
+    return "".join(lines)
+
+
 def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
     """Формируем красивый HTML для тела письма админу (с сегментацией лида)."""
     css_map = {
@@ -159,11 +203,6 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
         """)
     systems_html = "".join(system_blocks)
 
-    username_block = (
-        f'<p style="margin:4px 0"><b>✈️ Username:</b> @{escape(user.platform_username)}</p>'
-        if user.platform_username else ""
-    )
-
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="font-family:Arial,sans-serif;line-height:1.5;color:#333;background:#f5f5f5;margin:0;padding:20px">
@@ -185,8 +224,7 @@ def _build_html_body(user: UserSnapshot, result: TestResult) -> str:
         <p style="margin:4px 0"><b>👤 ФИО:</b> {escape(user.full_name)}</p>
         <p style="margin:4px 0"><b>📱 Телефон:</b> <a href="tel:{escape(user.phone)}" style="color:#1976D2;text-decoration:none">{escape(user.phone)}</a></p>
         <p style="margin:4px 0"><b>📡 Платформа:</b> {escape(user.platform)}</p>
-        <p style="margin:4px 0"><b>🆔 User ID:</b> <code>{user.platform_user_id}</code></p>
-        {username_block}
+        {_build_lead_links_block(user)}
       </div>
 
       {referrer_block}

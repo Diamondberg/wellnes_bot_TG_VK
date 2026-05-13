@@ -241,25 +241,27 @@ async def submit_test(
     user_email = str(payload.email).strip().lower() if payload.email else None
 
     # ─── 2. Реферер (с fallback на дистрибьютора) ─────────
-    # Шаг 2.1: пробуем найти реферера по invite-id из ссылки
+    # Шаг 2.1: ищем реферера по invite-id ВО ВСЕХ платформах.
+    # Реф-ссылка могла прийти от юзера в TG, а получатель открыл её в VK —
+    # ищем ID отправителя в любом из платформенных полей.
     real_referrer: User | None = None
     if payload.referrer_platform_id is not None:
-        real_referrer = await repo.get_user_by_platform_id(
+        real_referrer = await repo.find_referrer_by_any_platform_id(
             session,
             tenant_id=tenant.id,
-            platform=payload.platform.platform,
             platform_user_id=payload.referrer_platform_id,
         )
 
         if real_referrer is not None:
-            # Защита от самореференса: юзер передал свой же ID
+            # Защита от самореференса: юзер передал свой собственный ID
             if (
-                real_referrer.tg_user_id == payload.platform.user_id
-                and payload.platform.platform == "telegram"
+                (real_referrer.tg_user_id == payload.platform.user_id and payload.platform.platform == "telegram")
+                or (real_referrer.vk_user_id == payload.platform.user_id and payload.platform.platform == "vk")
+                or (real_referrer.max_user_id == payload.platform.user_id and payload.platform.platform == "max")
             ):
                 logger.warning(
                     f"⚠️ Самореференс отклонён: юзер {payload.platform.user_id} "
-                    f"передал свой же tg_id как реферер"
+                    f"передал свой же ID как реферер"
                 )
                 real_referrer = None
             else:
@@ -269,8 +271,8 @@ async def submit_test(
                 )
         else:
             logger.info(
-                f"🎁 Реферер с {payload.platform.platform}_id="
-                f"{payload.referrer_platform_id} в БД не найден — битая ссылка"
+                f"🎁 Реферер с invite-id={payload.referrer_platform_id} "
+                f"в БД не найден — битая ссылка"
             )
 
     # Шаг 2.2: если реферера нет — fallback на дистрибьютора
@@ -285,19 +287,20 @@ async def submit_test(
     else:
         effective_referrer = real_referrer
 
-    # Дополнительная защита: если реферер — это сам дистрибьютор, но юзер
-    # с тем же tg_user_id что у дистрибьютора. Чтобы не привязывать
-    # дистрибьютора к самому себе как реферера.
-    if (
-        effective_referrer is not None
-        and effective_referrer.is_distributor
-        and effective_referrer.tg_user_id == payload.platform.user_id
-        and payload.platform.platform == "telegram"
-    ):
-        logger.info(
-            "ℹ️ Сам дистрибьютор проходит тест — реферер не назначается"
-        )
-        effective_referrer = None
+    # Дополнительная защита: если эффективный реферер — это сам дистрибьютор,
+    # и ID совпадает с ID текущего юзера в его платформе (т.е. дистрибьютор
+    # сам проходит тест) — не привязываем сам к себе.
+    if effective_referrer is not None and effective_referrer.is_distributor:
+        same = False
+        if payload.platform.platform == "telegram":
+            same = effective_referrer.tg_user_id == payload.platform.user_id
+        elif payload.platform.platform == "vk":
+            same = effective_referrer.vk_user_id == payload.platform.user_id
+        elif payload.platform.platform == "max":
+            same = effective_referrer.max_user_id == payload.platform.user_id
+        if same:
+            logger.info("ℹ️ Сам дистрибьютор проходит тест — реферер не назначается")
+            effective_referrer = None
 
     referrer_user_id = effective_referrer.id if effective_referrer else None
 
@@ -392,6 +395,11 @@ async def submit_test(
         platform=payload.platform.platform,
         platform_user_id=payload.platform.user_id,
         platform_username=payload.platform.username,
+        # ID самого лида во всех платформах (для кликабельных ссылок в письме админу)
+        lead_tg_user_id=user.tg_user_id,
+        lead_tg_username=user.tg_username,
+        lead_vk_user_id=user.vk_user_id,
+        lead_max_user_id=user.max_user_id,
         referrer_name=snapshot_referrer.full_name if snapshot_referrer else None,
         referrer_phone=snapshot_referrer.phone if snapshot_referrer else None,
         referrer_email=snapshot_referrer.email if snapshot_referrer else None,
