@@ -712,17 +712,34 @@ ${link}`
                     return Math.round(((this.test.currentIndex + 1) / this.test.questions.length) * 100);
                 },
 
+                // ─── Платформа (определяется в init(), потом не меняется) ──
+                platform: 'browser',     // 'telegram' | 'vk' | 'browser'
+                vkUserId: null,          // заполняется после /api/vk/verify
+                vkLaunchParams: null,    // сырая строка launch params (для отладки)
+
                 // ─── Шаринг: реф-ссылка и сообщение ──────────
                 get currentUserPlatformId() {
-                    // ID самого юзера на платформе — нужен для генерации ЕГО реф-ссылки
-                    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 999000111;
+                    if (this.platform === 'telegram') {
+                        return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 999000111;
+                    }
+                    if (this.platform === 'vk') {
+                        return this.vkUserId || 999000111;
+                    }
+                    return 999000111;
                 },
-                // Строгий ID владельца стораджа. БЕЗ заглушки — в браузере вне TG возвращает null.
-                // Используется только для проверки "тот же это юзер или другой".
                 get ownerId() {
-                    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || null;
+                    if (this.platform === 'telegram') {
+                        return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || null;
+                    }
+                    if (this.platform === 'vk') {
+                        return this.vkUserId || null;
+                    }
+                    return null;
                 },
                 get referralLink() {
+                    if (this.platform === 'vk') {
+                        return `https://vk.com/app54517827#invite_${this.currentUserPlatformId}`;
+                    }
                     return `https://t.me/${BOT_USERNAME}?start=invite_${this.currentUserPlatformId}`;
                 },
                 get shareMessage() {
@@ -739,7 +756,7 @@ ${link}`
                 },
 
                 init() {
-                    this.detectPlatform();   // ← определяем платформу ДО loadState (ownerId зависит)
+                    this.detectPlatform();
                     this.loadState();
                     this.readReferrerFromUrl();
                     this.$watch('consent', () => this.saveState());
@@ -756,21 +773,20 @@ ${link}`
                         window.vkBridge.send('VKWebAppInit').catch((e) =>
                             console.warn('VKWebAppInit failed:', e)
                         );
-                        this.verifyVKLaunchParams();
+                        // не await: грузим UI параллельно с проверкой подписи
+                        this._vkVerifyPromise = this.verifyVKLaunchParams();
                     }
                     console.log('✅ App loaded. platform =', this.platform,
                                 'referrerPlatformId =', this.referrerPlatformId);
                 },
 
                 detectPlatform() {
-                    // VK: при открытии Mini App в URL всегда есть vk_app_id (и куча vk_* + sign).
                     const qs = new URLSearchParams(window.location.search);
                     if (qs.has('vk_app_id') && qs.has('sign')) {
                         this.platform = 'vk';
                         this.vkLaunchParams = window.location.search.replace(/^\?/, '');
                         return;
                     }
-                    // TG: WebApp есть и initData непустой (Desktop в браузере initData пустой!)
                     if (window.Telegram?.WebApp?.initData) {
                         this.platform = 'telegram';
                         return;
@@ -808,7 +824,7 @@ ${link}`
                         inviteCode = tgParam;
                     }
 
-                    // 2) VK Mini App: реферал передаётся через hash #invite_12345
+                    // 2) VK Mini App: реферал в hash #invite_12345
                     if (!inviteCode && window.location.hash) {
                         const h = window.location.hash.replace(/^#/, '');
                         if (h.startsWith('invite_') || /^\d+$/.test(h)) {
@@ -911,6 +927,11 @@ ${link}`
                 async submitTest() {
                     this.result.submitting = true;
                     this.result.error = null;
+
+                    // Если VK и верификация ещё в полёте — дождёмся, иначе уйдёт заглушка 999000111
+                    if (this.platform === 'vk' && this._vkVerifyPromise) {
+                        try { await this._vkVerifyPromise; } catch (e) {}
+                    }
 
                     const answers = [];
                     for (const q of this.test.questions) {
@@ -1067,6 +1088,14 @@ ${link}`
 
                 shareViaTelegram() {
                     const text = this.shareMessage;
+
+                    // VK: используем VK Bridge для шаринга на стене / другу
+                    if (this.platform === 'vk' && window.vkBridge) {
+                        window.vkBridge.send('VKWebAppShare', { link: this.referralLink })
+                            .catch((e) => console.warn('VKWebAppShare failed:', e));
+                        return;
+                    }
+
                     const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(this.referralLink)}&text=${encodeURIComponent(text)}`;
 
                     if (window.Telegram?.WebApp) {
